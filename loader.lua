@@ -1,6 +1,7 @@
 -- 540CHEATS v24 GUI | Cheat Hub (Loop Towers Mode Added)
 
 local Players      = game:GetService("Players")
+local RunService   = game:GetService("RunService")
 local UIS          = game:GetService("UserInputService")
 local VIM          = game:GetService("VirtualInputManager")
 local TweenService = game:GetService("TweenService")
@@ -24,14 +25,17 @@ local UnitUtil          = nil; pcall(function() UnitUtil = require(RS.Framework.
 local PlotConfig        = nil; pcall(function() PlotConfig = require(RS.Framework.Features.Plot.PlotConfig) end)
 local PlotController    = nil; pcall(function() PlotController = require(RS.Framework.Features.Plot.PlotController) end)
 
-local TowerScreen       = UIReferences.Root.Tower.Screen
-local TowerBg           = TowerScreen.Parent.Background
-local HiddenBtn         = TowerScreen.Parent.Hidden
+local TowerScreen, TowerBg, HiddenBtn = nil, nil, nil
+pcall(function()
+    TowerScreen = UIReferences.Root.Tower.Screen
+    TowerBg     = TowerScreen.Parent.Background
+    HiddenBtn   = TowerScreen.Parent.Hidden
+end)
 
 pcall(function()
     HUDController.showAll("inTower")
-    TowerScreen.Visible = false
-    TowerBg.Visible = false
+    if TowerScreen then TowerScreen.Visible = false end
+    if TowerBg then TowerBg.Visible = false end
 end)
 
 -- ── Remotes ───────────────────────────────────────────────────────────────────
@@ -64,7 +68,7 @@ print("[HUB] Remotes OK")
 
 local UPGRADE_PRICES = {}
 local UPGRADE_PARENT = {}
-for name, data in RealUpgrades do
+for name, data in pairs(RealUpgrades) do
     if name ~= "Start" and data.price then
         UPGRADE_PRICES[name] = data.price
         local parent = RealTreeStructure.GetParent(name)
@@ -73,7 +77,7 @@ for name, data in RealUpgrades do
 end
 
 local ALL_TOWERS = {}
-for name, data in RealTowers.GetAll() do
+for name, data in pairs(RealTowers.GetAll()) do
     table.insert(ALL_TOWERS, {
         name       = name,
         order      = data.order or 99,
@@ -166,6 +170,10 @@ local CFG = {
     AutoUpgradePlot  = false,
     PlotTargetLvl    = 50,
     PlotUpgradeMode  = "Equal",
+    BoostFPS         = false,
+    Disable3DRender  = false,
+    SuperRAMSaver    = false,
+    HideGameUI       = false,
 }
 
 local FONT = Enum.Font.RobotoMono
@@ -216,10 +224,10 @@ end
 
 local function claimAllQuests()
     local DC=getDC(); if not DC then return end
-    for period,ids in QUEST_PERIODS do
+    for period, ids in pairs(QUEST_PERIODS) do
         local qd; pcall(function() qd=DC.Quests[period]() end)
         if not qd then continue end
-        for _,id in ids do
+        for _, id in ipairs(ids) do
             if not (qd.claimed or {})[id] then
                 pcall(function() QuestSignal:FireServer(period,id,qd.expiresAt or 0) end)
                 task.wait(0.25)
@@ -231,7 +239,7 @@ end
 local function getBestDice(DC)
     local money=getMoney()
     local bestOwned,bestBuyable=nil,nil
-    for _,d in DICE_LIST do
+    for _, d in ipairs(DICE_LIST) do
         local owned=DC and DC.OwnedDice and DC.OwnedDice[d.name] and DC.OwnedDice[d.name]()
         if owned==true then
             if not bestOwned then bestOwned=d end
@@ -324,7 +332,7 @@ local function autoUpgradeSkillTree()
     local DC=getDC(); if not DC then return end
     local money=getMoney()
     if money<=0 then return end
-    for upgName,price in UPGRADE_PRICES do
+    for upgName, price in pairs(UPGRADE_PRICES) do
         if money<price then continue end
         local allowed = false
         for _, branch in ipairs(SKILL_BRANCHES) do
@@ -368,22 +376,34 @@ local function updateRunBtnText()
     end
 end
 
-TowerScreen:GetPropertyChangedSignal("Visible"):Connect(function()
-    if CFG.AutoTowerQueue and TowerScreen.Visible then
-        TowerScreen.Visible = false
-        pcall(function() HUDController.showAll("inTower") end)
+pcall(function()
+    if TowerScreen then
+        TowerScreen:GetPropertyChangedSignal("Visible"):Connect(function()
+            if CFG.AutoTowerQueue and TowerScreen.Visible then
+                TowerScreen.Visible = false
+                pcall(function() HUDController.showAll("inTower") end)
+            end
+        end)
     end
 end)
 
-TowerBg:GetPropertyChangedSignal("Visible"):Connect(function()
-    if CFG.AutoTowerQueue and TowerBg.Visible then
-        TowerBg.Visible = false
+pcall(function()
+    if TowerBg then
+        TowerBg:GetPropertyChangedSignal("Visible"):Connect(function()
+            if CFG.AutoTowerQueue and TowerBg.Visible then
+                TowerBg.Visible = false
+            end
+        end)
     end
 end)
 
-HiddenBtn:GetPropertyChangedSignal("Position"):Connect(function()
-    if CFG.AutoTowerQueue and HiddenBtn.Position ~= UDim2.new(0, -9999, 0, -9999) then
-        HiddenBtn.Position = UDim2.new(0, -9999, 0, -9999)
+pcall(function()
+    if HiddenBtn then
+        HiddenBtn:GetPropertyChangedSignal("Position"):Connect(function()
+            if CFG.AutoTowerQueue and HiddenBtn.Position ~= UDim2.new(0, -9999, 0, -9999) then
+                HiddenBtn.Position = UDim2.new(0, -9999, 0, -9999)
+            end
+        end)
     end
 end)
 
@@ -565,14 +585,150 @@ task.spawn(function() while true do task.wait(60)
     end
 end end)
 
+-- ── Boost FPS Optimizer ───────────────────────────────────────────────────────
+local Lighting = game:GetService("Lighting")
+local Terrain  = workspace:FindFirstChildOfClass("Terrain")
+local _fpsConn = nil
+
+local function optimizeInstance(inst)
+    if inst:IsA("BasePart") then
+        inst.Material = Enum.Material.SmoothPlastic
+        inst.CastShadow = false
+        inst.Reflectance = 0
+    elseif inst:IsA("Decal") or inst:IsA("Texture") then
+        inst.Transparency = 1
+    elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Fire") or inst:IsA("Smoke") or inst:IsA("Sparkles") then
+        inst.Enabled = false
+    elseif inst:IsA("PostEffect") or inst:IsA("Atmosphere") or inst:IsA("Clouds") then
+        inst.Enabled = false
+    end
+end
+
+local function applyBoostFPS()
+    pcall(function()
+        settings().Rendering.QualityLevel = 1
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        if Terrain then
+            Terrain.WaterWaveSize = 0
+            Terrain.WaterWaveSpeed = 0
+            Terrain.WaterReflectance = 0
+            Terrain.WaterTransparency = 0
+        end
+        for _, inst in ipairs(Lighting:GetDescendants()) do
+            if inst:IsA("PostEffect") or inst:IsA("Atmosphere") or inst:IsA("Clouds") then
+                inst.Enabled = false
+            end
+        end
+        for _, inst in ipairs(workspace:GetDescendants()) do
+            optimizeInstance(inst)
+        end
+    end)
+end
+
+local function toggleBoostFPS(enable)
+    CFG.BoostFPS = enable
+    if enable then
+        applyBoostFPS()
+        if not _fpsConn then
+            _fpsConn = workspace.DescendantAdded:Connect(function(inst)
+                if CFG.BoostFPS then
+                    task.defer(function()
+                        pcall(optimizeInstance, inst)
+                    end)
+                end
+            end)
+        end
+    else
+        if _fpsConn then
+            _fpsConn:Disconnect()
+            _fpsConn = nil
+        end
+    end
+end
+
+local function toggle3DRendering(enable)
+    CFG.Disable3DRender = enable
+    pcall(function()
+        RunService:Set3dRenderingEnabled(not enable)
+    end)
+end
+
+local _origVolume = 1
+local function toggleSuperRAMSaver(enable)
+    CFG.SuperRAMSaver = enable
+    CFG.Disable3DRender = enable
+    pcall(function()
+        RunService:Set3dRenderingEnabled(not enable)
+    end)
+    pcall(function()
+        local ugs = UserSettings():GetService("UserGameSettings")
+        if enable then
+            _origVolume = ugs.MasterVolume
+            ugs.MasterVolume = 0
+            collectgarbage("collect")
+        else
+            ugs.MasterVolume = _origVolume or 1
+        end
+    end)
+end
+
+local _hiddenGuis = {}
+local function toggleHideGameUI(enable)
+    CFG.HideGameUI = enable
+    pcall(function()
+        local pg = LP:FindFirstChild("PlayerGui")
+        if not pg then return end
+        if enable then
+            _hiddenGuis = {}
+            for _, g in ipairs(pg:GetChildren()) do
+                if g:IsA("ScreenGui") and g.Name ~= "540CHEATS_v24" and g.Enabled then
+                    _hiddenGuis[g] = true
+                    g.Enabled = false
+                end
+            end
+        else
+            for g, _ in pairs(_hiddenGuis) do
+                if g and g.Parent then
+                    g.Enabled = true
+                end
+            end
+            _hiddenGuis = {}
+        end
+    end)
+end
+
+task.spawn(function()
+    while true do
+        task.wait(60)
+        if CFG.SuperRAMSaver then
+            pcall(function() collectgarbage("collect") end)
+        end
+    end
+end)
+
 -- ============================================================
 -- ===== UI =====
 -- ============================================================
 local gui,main,minimizedLogo,notif
 
+pcall(function()
+    local existing = (gethui and gethui():FindFirstChild("540CHEATS_v24"))
+        or (LP and LP:FindFirstChild("PlayerGui") and LP.PlayerGui:FindFirstChild("540CHEATS_v24"))
+        or (game:GetService("CoreGui"):FindFirstChild("540CHEATS_v24"))
+    if existing then existing:Destroy() end
+end)
+
+local targetParent = LP:WaitForChild("PlayerGui")
+pcall(function()
+    if gethui then
+        targetParent = gethui()
+    end
+end)
+
 gui=Instance.new("ScreenGui")
 gui.Name="540CHEATS_v24"; gui.ResetOnSpawn=false; gui.IgnoreGuiInset=true
-gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; gui.Parent=LP:WaitForChild("PlayerGui")
+gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; gui.Parent=targetParent
 
 main=Instance.new("Frame")
 main.Size=UDim2.new(0,640,0,500); main.Position=UDim2.new(0.5,-320,0.5,-250)
@@ -642,7 +798,7 @@ Instance.new("UICorner",closeBtn).CornerRadius=UDim.new(0,6)
 closeBtn.MouseEnter:Connect(function() TweenService:Create(closeBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(200,50,60),TextColor3=Color3.new(1,1,1)}):Play() end)
 closeBtn.MouseLeave:Connect(function() TweenService:Create(closeBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(55,28,34),TextColor3=Color3.fromRGB(230,180,190)}):Play() end)
 closeBtn.MouseButton1Click:Connect(function()
-    for k in CFG do CFG[k]=false end
+    for k, _ in pairs(CFG) do CFG[k]=false end
     stopTowerQueue()
     pcall(function() gui:Destroy() end) end)
 
@@ -1168,6 +1324,10 @@ towerRunBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ── Utility tab ───────────────────────────────────────────────────────────────
+makeToggle(pages["Utility"],"AFK Super Saver (1+2+3)","กดทีเดียว: ปิด 3D จอขาว + ล้างขยะ RAM ทุก 60s + ปิดเสียง", CFG.SuperRAMSaver, function(v) toggleSuperRAMSaver(v) end)
+makeToggle(pages["Utility"],"Hide Game UI (4)","ซ่อน UI เกมทั้งหมด (ยกเว้น Cheat Hub) ลดภาระ CPU/RAM", CFG.HideGameUI, function(v) toggleHideGameUI(v) end)
+makeToggle(pages["Utility"],"Disable 3D Rendering","ปิดภาพ 3D (จอขาว) ประหยัด CPU & RAM เหมาะกับ AFK", CFG.Disable3DRender, function(v) toggle3DRendering(v) end)
+makeToggle(pages["Utility"],"Boost FPS","ลดเอฟเฟกต์/กราฟิกและแสงเงา เพิ่มความลื่นไหลและ FPS", CFG.BoostFPS, function(v) toggleBoostFPS(v) end)
 makeToggle(pages["Utility"],"Anti AFK","ป้องกันการหลุดจากการอยู่เฉยๆ (กด F13 อัตโนมัติ)", CFG.AntiAFK, function(v) CFG.AntiAFK=v end)
 makeToggle(pages["Utility"],"Auto Claim Quests","รับของรางวัลเควสทั้งหมดอัตโนมัติ", CFG.AutoQuest, function(v) CFG.AutoQuest=v end)
 
@@ -1189,6 +1349,10 @@ info.Text="  CHEAT HUB v24\n\n" ..
     "  Queue Runner        — 1 run each, from easiest to hardest\n" ..
     "  Menu-Safe Monitor   — unaffected by Daily/popup menus\n\n" ..
     "  Utility\n" ..
+    "  AFK Super Saver     — 3D Off + Auto RAM Clean + Mute\n" ..
+    "  Hide Game UI        — hide all game GUIs safely\n" ..
+    "  Disable 3D Render   — white screen, extreme CPU/RAM save\n" ..
+    "  Boost FPS           — remove shadows/particles/materials\n" ..
     "  Anti AFK            — F13 every 60s\n" ..
     "  Auto Quest          — Daily & Weekly\n\n" ..
     "  Hotkeys\n" ..
@@ -1245,3 +1409,4 @@ UIS.InputBegan:Connect(function(i,g)
 end)
 
 print("[CHEAT HUB v24] พร้อมใช้งาน ✓")
+pcall(function() showNotif("CHEAT HUB v24 พร้อมใช้งานแล้ว") end)
