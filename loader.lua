@@ -5,6 +5,7 @@ local RunService   = game:GetService("RunService")
 local UIS          = game:GetService("UserInputService")
 local VIM          = game:GetService("VirtualInputManager")
 local TweenService = game:GetService("TweenService")
+local HttpService  = game:GetService("HttpService")
 local LP           = Players.LocalPlayer
 local RS           = game:GetService("ReplicatedStorage")
 
@@ -63,6 +64,15 @@ local RollDice       = RF("RollService",     "RollDice")
 local BuyUpgrade     = REroot("BuyUpgrade")
 local CancelTower    = RF("Towers",          "CancelTower")
 local EquipBestTeam  = RE("Towers",          "EquipBestTowerTeam")
+local UseBoost       = nil
+pcall(function() UseBoost = RE("BoostService", "Use") end)
+if not UseBoost then
+    pcall(function()
+        local ClientComm = require(RS.Packages.Network).ClientComm
+        local bComm = ClientComm.new(RS.Network, false, "BoostService")
+        UseBoost = bComm:GetSignal("Use")
+    end)
+end
 
 print("[HUB] Remotes OK")
 
@@ -102,6 +112,50 @@ local SKILL_BRANCHES = {
 local SelectedSkills = {}
 for _, b in ipairs(SKILL_BRANCHES) do
     SelectedSkills[b.name] = true
+end
+
+-- ── Luck Potions Definition (19 Potions across 6 Categories) ──────────────────
+local LUCK_CATEGORIES = {
+    {
+        id = "Luck",
+        name = "Standard Luck",
+        sub = "Luck I - IV (1.25x - 4.25x)",
+        items = {"Luck IV", "Luck III", "Luck II", "Luck I"}
+    },
+    {
+        id = "Dragon Luck",
+        name = "Dragon Luck",
+        sub = "Dragon Luck I - III (1.25x - 2.0x)",
+        items = {"Dragon Luck III", "Dragon Luck II", "Dragon Luck I"}
+    },
+    {
+        id = "Cursed Luck",
+        name = "Cursed Luck",
+        sub = "Cursed Luck I - III (1.25x - 2.0x)",
+        items = {"Cursed Luck III", "Cursed Luck II", "Cursed Luck I"}
+    },
+    {
+        id = "Pirate Luck",
+        name = "Pirate Luck",
+        sub = "Pirate Luck I - III (1.5x - 3.0x)",
+        items = {"Pirate Luck III", "Pirate Luck II", "Pirate Luck I"}
+    },
+    {
+        id = "Leaf Luck",
+        name = "Leaf Luck",
+        sub = "Leaf Luck I - III (2.0x - 4.0x)",
+        items = {"Leaf Luck III", "Leaf Luck II", "Leaf Luck I"}
+    },
+    {
+        id = "Slayer Luck",
+        name = "Slayer Luck",
+        sub = "Slayer Luck I - III (2.0x - 4.0x)",
+        items = {"Slayer Luck III", "Slayer Luck II", "Slayer Luck I"}
+    },
+}
+local SelectedLuckCategories = {}
+for _, cat in ipairs(LUCK_CATEGORIES) do
+    SelectedLuckCategories[cat.id] = true
 end
 
 -- ── Constants ─────────────────────────────────────────────────────────────────
@@ -174,6 +228,8 @@ local CFG = {
     Disable3DRender  = false,
     SuperRAMSaver    = false,
     HideGameUI       = false,
+    AutoUseLuck      = false,
+    AutoLuckOnEvent  = false,
 }
 
 local FONT = Enum.Font.RobotoMono
@@ -550,6 +606,186 @@ local function stopTowerQueue()
     if tBannerSub then tBannerSub.Text = "หยุดการทำงานแล้ว พร้อมเริ่มรอบใหม่" end
 end
 
+-- ── Luck Potions Logic ────────────────────────────────────────────────────────
+local EntryRegistry = nil
+pcall(function() EntryRegistry = require(RS.Framework.Features.Inventory.EntryRegistry) end)
+
+local function getLuckPotionsInInventory()
+    local DC = getDC()
+    if not DC or not DC.Inventory then return {}, 0 end
+    local inv = DC.Inventory() or {}
+    local counts = {}
+    local total = 0
+    for _, cat in ipairs(LUCK_CATEGORIES) do
+        counts[cat.id] = 0
+        for _, itemName in ipairs(cat.items) do
+            local entry = inv[itemName]
+            if entry and (entry.amount or 0) > 0 then
+                counts[cat.id] = counts[cat.id] + entry.amount
+                total = total + entry.amount
+            end
+        end
+    end
+    return counts, total
+end
+
+local function getActiveLuckInfo()
+    local DC = getDC()
+    if not DC or not DC.ActiveEntries then return {} end
+    local act = DC.ActiveEntries() or {}
+    local now = workspace:GetServerTimeNow()
+    local activeMap = {}
+
+    for actKey, actData in pairs(act) do
+        local cfg = nil
+        if EntryRegistry and EntryRegistry.getEntryConfig then
+            pcall(function() cfg = EntryRegistry.getEntryConfig(actData.name or actKey) end)
+        end
+        if cfg and cfg.kind == "Boost" and cfg.category and cfg.category:find("Luck") then
+            local rem = 0
+            if actData.remaining and typeof(actData.remaining) == "number" then
+                local started = actData.startedAt or now
+                rem = math.max(0, actData.remaining - math.max(0, now - started))
+            elseif actData.expiresAt and typeof(actData.expiresAt) == "number" then
+                rem = math.max(0, actData.expiresAt - os.time())
+            end
+            if rem > 0 then
+                activeMap[cfg.category] = {
+                    name = actData.name or actKey,
+                    remaining = math.floor(rem),
+                    tier = cfg.tier or 1,
+                }
+            end
+        end
+    end
+    return activeMap
+end
+
+local BoostController = nil
+pcall(function()
+    BoostController = require(RS.Framework.Features.Inventory.Kinds.Boost.BoostController)
+end)
+
+local function fireUseBoost(potionName)
+    local sent = false
+    if BoostController and BoostController.UseBoost then
+        local ok = pcall(BoostController.UseBoost, potionName)
+        if ok then sent = true end
+    end
+    if not sent and UseBoost then
+        pcall(function()
+            if UseBoost.Fire then
+                UseBoost:Fire(potionName)
+                sent = true
+            elseif UseBoost.FireServer then
+                UseBoost:FireServer(potionName)
+                sent = true
+            end
+        end)
+    end
+    return sent
+end
+
+local function autoUseLuckPotions()
+    local DC = getDC()
+    if not DC or not DC.Inventory then return end
+    local inv = DC.Inventory() or {}
+    local activeMap = getActiveLuckInfo()
+
+    for _, cat in ipairs(LUCK_CATEGORIES) do
+        if SelectedLuckCategories[cat.id] ~= false then
+            local curActive = activeMap[cat.id]
+            -- If active buff has 3s or less remaining, consume the best potion in this category
+            if not curActive or curActive.remaining <= 3 then
+                for _, potionName in ipairs(cat.items) do
+                    local itemEntry = inv[potionName]
+                    local amt = itemEntry and itemEntry.amount or 0
+                    if amt > 0 then
+                        fireUseBoost(potionName)
+                        task.wait(0.05)
+                        break
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function useBestLuckNow(forceAllCategories)
+    local DC = getDC()
+    if not DC or not DC.Inventory then
+        pcall(function() showNotif("ไม่สามารถอ่านข้อมูล Inventory ได้") end)
+        return 0
+    end
+    local inv = DC.Inventory() or {}
+    local usedCount = 0
+
+    for _, cat in ipairs(LUCK_CATEGORIES) do
+        if forceAllCategories or (SelectedLuckCategories[cat.id] ~= false) then
+            for _, potionName in ipairs(cat.items) do
+                local itemEntry = inv[potionName]
+                local amt = itemEntry and itemEntry.amount or 0
+                if amt > 0 then
+                    fireUseBoost(potionName)
+                    usedCount = usedCount + 1
+                    task.wait(0.05)
+                    break
+                end
+            end
+        end
+    end
+    if not forceAllCategories then
+        if usedCount > 0 then
+            pcall(function() showNotif("⚡ กดใช้น้ำยาโชคระดับสูงสุด " .. usedCount .. " หมวดหมู่แล้ว ✓") end)
+        else
+            pcall(function() showNotif("ไม่มีน้ำยาโชคในหมวดหมู่ที่เลือกอยู่ในกระเป๋า") end)
+        end
+    end
+    return usedCount
+end
+
+-- ── Weather (Server Event) Observer ───────────────────────────────────────────
+local currentServerWeather = nil
+local lastHandledWeatherStart = nil
+
+local function checkEventAutoLuck()
+    if not CFG.AutoLuckOnEvent then return end
+    if not currentServerWeather or not currentServerWeather.name then return end
+    local wName = tostring(currentServerWeather.name)
+    local wStart = currentServerWeather.startedAt or 0
+
+    if (wName == "Luck Event" or wName:find("Luck")) then
+        if lastHandledWeatherStart ~= wStart then
+            lastHandledWeatherStart = wStart
+            task.spawn(function()
+                local used = useBestLuckNow(true)
+                print("[LUCK EVENT] Auto-used " .. used .. " best luck potions!")
+                pcall(function()
+                    showNotif("🍀 Luck Event ตรวจพบแล้ว! กดใช้น้ำยาโชคระดับสูงสุด " .. used .. " ชนิดเรียบร้อย ✓")
+                end)
+            end)
+        end
+    end
+end
+
+local function setupWeatherListener()
+    pcall(function()
+        local ClientComm = require(RS.Packages.Network).ClientComm
+        local weatherComm = ClientComm.new(RS.Network, false, "WeatherService")
+        local activeWeatherProp = weatherComm:GetProperty("ActiveWeather")
+
+        activeWeatherProp:Observe(function(weatherData)
+            currentServerWeather = weatherData
+            if weatherData and weatherData.name then
+                task.spawn(checkEventAutoLuck)
+            else
+                lastHandledWeatherStart = nil
+            end
+        end)
+    end)
+end
+task.spawn(setupWeatherListener)
+
 -- ── Background loops ──────────────────────────────────────────────────────────
 task.spawn(function() while true do task.wait(COLLECT_LOOP)
     if CFG.AutoCollect then collectAll() end
@@ -574,6 +810,9 @@ task.spawn(function() while true do task.wait(UPGRADE_LOOP)
 end end)
 task.spawn(function() while true do task.wait(PLOT_UPGRADE_LOOP)
     if CFG.AutoUpgradePlot then autoUpgradePlots() end
+end end)
+task.spawn(function() while true do task.wait(2)
+    if CFG.AutoUseLuck then pcall(autoUseLuckPotions) end
 end end)
 task.spawn(function() while true do task.wait(60)
     if CFG.AntiAFK then
@@ -730,6 +969,21 @@ gui=Instance.new("ScreenGui")
 gui.Name="540CHEATS_v24"; gui.ResetOnSpawn=false; gui.IgnoreGuiInset=true
 gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; gui.Parent=targetParent
 
+notif=Instance.new("TextLabel",gui)
+notif.Size=UDim2.new(0,300,0,32); notif.Position=UDim2.new(0.5,-150,0,-40)
+notif.BackgroundColor3=DARK.bg; notif.BackgroundTransparency=0.15
+notif.TextColor3=DARK.accent; notif.Font=FONT; notif.TextSize=13; notif.Visible=false
+Instance.new("UICorner",notif).CornerRadius=UDim.new(0,8)
+Instance.new("UIStroke",notif).Color=DARK.accent
+
+showNotif = function(text)
+    notif.Text="  > "..text; notif.Visible=true
+    TweenService:Create(notif,TweenInfo.new(0.3),{Position=UDim2.new(0.5,-150,0,20)}):Play()
+    task.delay(1.5,function()
+        TweenService:Create(notif,TweenInfo.new(0.3),{Position=UDim2.new(0.5,-150,0,-40)}):Play()
+        task.wait(0.4); notif.Visible=false end)
+end
+
 main=Instance.new("Frame")
 main.Size=UDim2.new(0,640,0,500); main.Position=UDim2.new(0.5,-320,0.5,-250)
 main.BackgroundColor3=DARK.bg; main.BorderSizePixel=0; main.Active=true; main.Parent=gui
@@ -737,6 +991,7 @@ Instance.new("UICorner",main).CornerRadius=UDim.new(0,12)
 Instance.new("UIStroke",main).Color=DARK.border
 
 local HH=54
+do
 local header=Instance.new("Frame",main)
 header.Size=UDim2.new(1,0,0,HH); header.BackgroundColor3=DARK.header; header.BorderSizePixel=0
 Instance.new("UICorner",header).CornerRadius=UDim.new(0,12)
@@ -801,6 +1056,7 @@ closeBtn.MouseButton1Click:Connect(function()
     for k, _ in pairs(CFG) do CFG[k]=false end
     stopTowerQueue()
     pcall(function() gui:Destroy() end) end)
+end
 
 local sidebar=Instance.new("Frame",main)
 sidebar.Size=UDim2.new(0,160,1,-HH); sidebar.Position=UDim2.new(0,0,0,HH)
@@ -843,11 +1099,12 @@ local function createTab(name,icon)
 end
 
 createTab("Main","🏠"); createTab("Roll","🎲"); createTab("Skill","⚡")
-createTab("Tower","🏰"); createTab("Utility","⚙️"); createTab("Settings","🛠️")
+createTab("Tower","🏰"); createTab("Utility","⚙️"); createTab("Misc","💾"); createTab("Settings","🛠️")
 tabs["Main"].BackgroundTransparency=0; tabs["Main"].BackgroundColor3=DARK.item
 pages["Main"].Visible=true
 tabs["Main"]:FindFirstChild("TextLabel").TextColor3=Color3.new(1,1,1)
 
+do
 local uPanel=Instance.new("Frame",sidebar)
 uPanel.Size=UDim2.new(1,-20,0,60); uPanel.Position=UDim2.new(0,10,1,-70)
 uPanel.BackgroundColor3=DARK.item; uPanel.BorderSizePixel=0
@@ -870,6 +1127,7 @@ task.spawn(function()
     local ok,t=pcall(function()
         return Players:GetUserThumbnailAsync(LP.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size100x100) end)
     if ok and t then uAv.Image=t end end)
+end
 
 local function makeToggle(parent,label,sublabel,initial,cb)
     local h=sublabel and 52 or 36
@@ -910,6 +1168,16 @@ local function makeToggle(parent,label,sublabel,initial,cb)
         cb(st)
     end)
     return setVisual,sw,k
+end
+
+local registeredToggles = {}
+local function makeCfgToggle(parent,cfgKey,label,sublabel,extraCb)
+    local setVis = makeToggle(parent,label,sublabel,CFG[cfgKey],function(val)
+        CFG[cfgKey] = val
+        if extraCb then pcall(extraCb, val) end
+    end)
+    registeredToggles[cfgKey] = { set = setVis, cb = extraCb }
+    return setVis
 end
 
 local function makeButton(parent,label,sublabel,btnText,cb)
@@ -999,10 +1267,11 @@ local function makeSelector(parent,label,sublabel,options,defaultIdx,cb)
     l.TextXAlignment=Enum.TextXAlignment.Left; l.Font=FONT; l.TextSize=12
     local s=nil
     if sublabel then
-        s=Instance.new("TextLabel",c)
-        s.Size=UDim2.new(1,-170,0,14); s.Position=UDim2.new(0,14,0,28)
-        s.BackgroundTransparency=1; s.Text=sublabel; s.TextColor3=DARK.subtext
-        s.TextXAlignment=Enum.TextXAlignment.Left; s.Font=FONT; s.TextSize=10
+        local sLbl=Instance.new("TextLabel",c)
+        sLbl.Size=UDim2.new(1,-170,0,14); sLbl.Position=UDim2.new(0,14,0,28)
+        sLbl.BackgroundTransparency=1; sLbl.Text=sublabel; sLbl.TextColor3=DARK.subtext
+        sLbl.TextXAlignment=Enum.TextXAlignment.Left; sLbl.Font=FONT; sLbl.TextSize=10
+        s = sLbl
     end
 
     local selBtn=Instance.new("TextButton",c)
@@ -1029,30 +1298,239 @@ local function makeSelector(parent,label,sublabel,options,defaultIdx,cb)
         updateDisplay()
         cb(options[curIdx].value, curIdx)
     end)
-    return c
+
+    local function setVal(v)
+        for i, opt in ipairs(options) do
+            if opt.value == v then
+                curIdx = i
+                updateDisplay()
+                break
+            end
+        end
+    end
+
+    return c, setVal
 end
 
+local plotLvlBox, setPlotMode
+local dropMenu, dropBtn, refreshTowerOpts, updateDropBtnText
+local skillDropMenu, skillDropBtn, refreshSkillOpts, updateSkillDropBtnText
+local luckDropMenu, luckDropBtn, refreshLuckOpts, updateLuckDropBtnText
+local cfgDropMenu, cfgDropBtn
+
 -- ── Main tab ─────────────────────────────────────────────────────────────────
-makeToggle(pages["Main"],"Auto Collect","เก็บเงินอัตโนมัติจากทุก Plot (15 ช่อง)", CFG.AutoCollect, function(v) CFG.AutoCollect=v end)
+local function setupMainTab()
+makeCfgToggle(pages["Main"],"AutoCollect","Auto Collect","เก็บเงินอัตโนมัติจากทุก Plot (15 ช่อง)")
 makeButton(pages["Main"],"Collect Cash Now","กดเพื่อเก็บเงินจากทุกช่องทันที 1 ครั้ง","Collect",function()
     collectAll()
 end)
-makeToggle(pages["Main"],"Auto Upgrade Plot Lvl","อัปเกรดเลเวลยูนิตใน Plot อัตโนมัติ", CFG.AutoUpgradePlot, function(v) CFG.AutoUpgradePlot=v end)
-makeInput(pages["Main"],"Target Plot Level","ตั้งเป้าหมายเลเวลที่ต้องการอัปเกรด (เช่น 50)", CFG.PlotTargetLvl, function(val) CFG.PlotTargetLvl=val end)
-makeSelector(pages["Main"],"Upgrade Mode","อัปเกรดเฉลี่ยทุกตัวใน Plot ให้เลเวลเท่าๆ กัน",{
+makeCfgToggle(pages["Main"],"AutoUpgradePlot","Auto Upgrade Plot Lvl","อัปเกรดเลเวลยูนิตใน Plot อัตโนมัติ")
+local _, plb = makeInput(pages["Main"],"Target Plot Level","ตั้งเป้าหมายเลเวลที่ต้องการอัปเกรด (เช่น 50)", CFG.PlotTargetLvl, function(val) CFG.PlotTargetLvl=val end)
+plotLvlBox = plb
+local _, spm = makeSelector(pages["Main"],"Upgrade Mode","อัปเกรดเฉลี่ยทุกตัวใน Plot ให้เลเวลเท่าๆ กัน",{
     { text = "Equal (Balanced)",  value = "Equal",  sub = "อัปเกรดเฉลี่ยทุกตัวใน Plot ให้เลเวลเท่าๆ กัน" },
     { text = "Focus (One by One)", value = "Single", sub = "อัปเกรดทีละตัวใน Plot ให้ถึงเป้าหมายก่อน" },
 }, 1, function(val) CFG.PlotUpgradeMode=val end)
-makeToggle(pages["Main"],"Auto Equip Best","เลือกสวมใส่ยูนิตที่ทำรายได้สูงสุดอัตโนมัติ", CFG.AutoEquip, function(v) CFG.AutoEquip=v end)
+setPlotMode = spm
+makeCfgToggle(pages["Main"],"AutoEquip","Auto Equip Best","เลือกสวมใส่ยูนิตที่ทำรายได้สูงสุดอัตโนมัติ")
+end
+setupMainTab()
 
 -- ── Roll tab ──────────────────────────────────────────────────────────────────
-makeToggle(pages["Roll"],"Auto Roll","ทอยลูกเต๋าอัตโนมัติทุก 2.6 วินาที", CFG.AutoRoll, function(v) CFG.AutoRoll=v end)
-makeToggle(pages["Roll"],"Auto Buy Best Dice","ซื้อลูกเต๋าที่มีค่าโชคสูงสุดอัตโนมัติ", CFG.AutoBuyDice, function(v) CFG.AutoBuyDice=v end)
-makeToggle(pages["Roll"],"Auto Equip Best Dice","สวมใส่ลูกเต๋าที่ดีที่สุดอัตโนมัติ", CFG.AutoEquipDice, function(v) CFG.AutoEquipDice=v end)
-makeToggle(pages["Roll"],"Auto Rebirth","รีเบิร์ธอัตโนมัติเมื่อเงินถึงเกณฑ์ที่กำหนด", CFG.AutoRebirth, function(v) CFG.AutoRebirth=v end)
+local function setupRollTab()
+makeCfgToggle(pages["Roll"],"AutoRoll","Auto Roll","ทอยลูกเต๋าอัตโนมัติทุก 2.6 วินาที")
+makeCfgToggle(pages["Roll"],"AutoBuyDice","Auto Buy Best Dice","ซื้อลูกเต๋าที่มีค่าโชคสูงสุดอัตโนมัติ")
+makeCfgToggle(pages["Roll"],"AutoEquipDice","Auto Equip Best Dice","สวมใส่ลูกเต๋าที่ดีที่สุดอัตโนมัติ")
+makeCfgToggle(pages["Roll"],"AutoRebirth","Auto Rebirth","รีเบิร์ธอัตโนมัติเมื่อเงินถึงเกณฑ์ที่กำหนด")
+makeCfgToggle(pages["Roll"],"AutoUseLuck","Auto Use Luck Potions","กดใช้น้ำยาโชคอัตโนมัติเมื่อเวลาบัฟหมด")
+makeCfgToggle(pages["Roll"],"AutoLuckOnEvent","Auto Luck on Luck Event","เมื่อ Luck Event เซิร์ฟเวอร์เริ่ม จะกดใช้น้ำยาโชคทุกชนิด (Tier สูงสุด) ทันทีอย่างละ 1 ครั้ง", function(val)
+    if val then
+        task.spawn(checkEventAutoLuck)
+    end
+end)
+
+local luckDropCard=Instance.new("Frame",pages["Roll"])
+luckDropCard.Size=UDim2.new(1,0,0,96); luckDropCard.BackgroundColor3=DARK.item; luckDropCard.BorderSizePixel=0
+Instance.new("UICorner",luckDropCard).CornerRadius=UDim.new(0,8)
+
+local lTitle=Instance.new("TextLabel",luckDropCard)
+lTitle.Size=UDim2.new(1,-170,0,18); lTitle.Position=UDim2.new(0,14,0,7)
+lTitle.BackgroundTransparency=1; lTitle.Text="🧪 Luck Potions Manager (19 Items)"
+lTitle.TextColor3=DARK.text; lTitle.TextXAlignment=Enum.TextXAlignment.Left; lTitle.Font=FONT; lTitle.TextSize=12
+
+local lSub=Instance.new("TextLabel",luckDropCard)
+lSub.Size=UDim2.new(1,-170,0,14); lSub.Position=UDim2.new(0,14,0,26)
+lSub.BackgroundTransparency=1; lSub.Text="เลือกหมวดหมู่น้ำยาโชคที่ต้องการใช้งาน"
+lSub.TextColor3=DARK.subtext; lSub.TextXAlignment=Enum.TextXAlignment.Left; lSub.Font=FONT; lSub.TextSize=10
+
+local lStatusLbl=Instance.new("TextLabel",luckDropCard)
+lStatusLbl.Size=UDim2.new(1,-170,0,20); lStatusLbl.Position=UDim2.new(0,14,0,48)
+lStatusLbl.BackgroundTransparency=1; lStatusLbl.Text="Active: ตรวจสอบสถานะ..."
+lStatusLbl.TextColor3=Color3.fromRGB(80,255,160); lStatusLbl.TextXAlignment=Enum.TextXAlignment.Left; lStatusLbl.Font=FONT; lStatusLbl.TextSize=10
+
+local lEventLbl=Instance.new("TextLabel",luckDropCard)
+lEventLbl.Size=UDim2.new(1,-28,0,18); lEventLbl.Position=UDim2.new(0,14,0,70)
+lEventLbl.BackgroundTransparency=1; lEventLbl.Text="🌟 Server Event: ติดตามสถานะอีเวนต์..."
+lEventLbl.TextColor3=DARK.hAccent; lEventLbl.TextXAlignment=Enum.TextXAlignment.Left; lEventLbl.Font=FONT; lEventLbl.TextSize=10
+
+luckDropBtn=Instance.new("TextButton",luckDropCard)
+luckDropBtn.Size=UDim2.new(0,145,0,28); luckDropBtn.Position=UDim2.new(1,-155,0,8)
+luckDropBtn.BackgroundColor3=Color3.fromRGB(32,24,48); luckDropBtn.BorderSizePixel=0
+luckDropBtn.Text="All Potions (6/6)  ▾"; luckDropBtn.TextColor3=Color3.fromRGB(240,230,255)
+luckDropBtn.Font=FONT; luckDropBtn.TextSize=11
+Instance.new("UICorner",luckDropBtn).CornerRadius=UDim.new(0,6)
+local luckDropBtnStroke=Instance.new("UIStroke",luckDropBtn)
+luckDropBtnStroke.Color=DARK.purple; luckDropBtnStroke.Thickness=1.2
+
+local useNowBtn=Instance.new("TextButton",luckDropCard)
+useNowBtn.Size=UDim2.new(0,145,0,24); useNowBtn.Position=UDim2.new(1,-155,0,44)
+useNowBtn.BackgroundColor3=Color3.fromRGB(40,30,55); useNowBtn.BorderSizePixel=0
+useNowBtn.Text="⚡ Use Best Now"; useNowBtn.TextColor3=Color3.fromRGB(255,215,80)
+useNowBtn.Font=FONT; useNowBtn.TextSize=10
+Instance.new("UICorner",useNowBtn).CornerRadius=UDim.new(0,6)
+local unbStroke=Instance.new("UIStroke",useNowBtn); unbStroke.Color=DARK.border
+
+useNowBtn.MouseButton1Click:Connect(function()
+    useBestLuckNow()
+end)
+
+local LUCK_ITEM_H = 34
+local LUCK_PADDING = 2
+local totalLuckHeight = #LUCK_CATEGORIES * (LUCK_ITEM_H + LUCK_PADDING) + 10
+
+luckDropMenu=Instance.new("ScrollingFrame",main)
+luckDropMenu.Size=UDim2.new(0,225,0,math.min(220, totalLuckHeight))
+luckDropMenu.BackgroundColor3=DARK.dropdown
+luckDropMenu.BorderSizePixel=0; luckDropMenu.ScrollBarThickness=4
+luckDropMenu.ScrollBarImageColor3=DARK.purple; luckDropMenu.Visible=false; luckDropMenu.ZIndex=100
+luckDropMenu.CanvasSize=UDim2.new(0, 0, 0, totalLuckHeight)
+luckDropMenu.AutomaticCanvasSize=Enum.AutomaticSize.None
+Instance.new("UICorner",luckDropMenu).CornerRadius=UDim.new(0,8)
+local ldmStroke=Instance.new("UIStroke",luckDropMenu); ldmStroke.Color=DARK.border; ldmStroke.Thickness=1.5
+local ldList=Instance.new("UIListLayout",luckDropMenu); ldList.Padding=UDim.new(0,LUCK_PADDING)
+local ldPad=Instance.new("UIPadding",luckDropMenu)
+ldPad.PaddingTop=UDim.new(0,5); ldPad.PaddingBottom=UDim.new(0,5)
+ldPad.PaddingLeft=UDim.new(0,5); ldPad.PaddingRight=UDim.new(0,5)
+
+updateLuckDropBtnText = function()
+    local count=0
+    for _,sel in pairs(SelectedLuckCategories) do if sel then count=count+1 end end
+    if count==0 then
+        luckDropBtn.Text="All Potions (0/6)  ▾"
+        luckDropBtn.TextColor3=Color3.fromRGB(240,230,255)
+    elseif count==#LUCK_CATEGORIES then
+        luckDropBtn.Text="All Potions (6/6)  ▾"
+        luckDropBtn.TextColor3=DARK.hAccent
+    else
+        luckDropBtn.Text=string.format("Selected (%d/%d)  ▾", count, #LUCK_CATEGORIES)
+        luckDropBtn.TextColor3=DARK.hAccent
+    end
+end
+updateLuckDropBtnText()
+
+local function toggleLuckDropdown()
+    if luckDropMenu.Visible then
+        luckDropMenu.Visible=false
+    else
+        if dropMenu then dropMenu.Visible=false end
+        if skillDropMenu then skillDropMenu.Visible=false end
+        local absPos=luckDropBtn.AbsolutePosition
+        local mainPos=main.AbsolutePosition
+        luckDropMenu.Position=UDim2.new(0, absPos.X-mainPos.X-75, 0, absPos.Y-mainPos.Y+32)
+        luckDropMenu.Visible=true
+    end
+end
+luckDropBtn.MouseButton1Click:Connect(toggleLuckDropdown)
+
+refreshLuckOpts = {}
+for _, cat in ipairs(LUCK_CATEGORIES) do
+    local opt=Instance.new("TextButton",luckDropMenu)
+    opt.Size=UDim2.new(1,0,0,LUCK_ITEM_H); opt.BackgroundColor3=DARK.item; opt.BackgroundTransparency=1
+    opt.BorderSizePixel=0; opt.Text=""; opt.ZIndex=101
+    Instance.new("UICorner",opt).CornerRadius=UDim.new(0,6)
+
+    local chk=Instance.new("TextLabel",opt)
+    chk.Size=UDim2.new(0,18,1,0); chk.Position=UDim2.new(0,6,0,0)
+    chk.BackgroundTransparency=1; chk.Text="○"; chk.TextColor3=DARK.subtext
+    chk.Font=FONT; chk.TextSize=12; chk.ZIndex=102
+
+    local oName=Instance.new("TextLabel",opt)
+    oName.Size=UDim2.new(1,-28,0,16); oName.Position=UDim2.new(0,26,0,2)
+    oName.BackgroundTransparency=1; oName.Text=cat.name; oName.TextColor3=DARK.text
+    oName.TextXAlignment=Enum.TextXAlignment.Left; oName.Font=FONT; oName.TextSize=11; oName.ZIndex=102
+
+    local oSub=Instance.new("TextLabel",opt)
+    oSub.Size=UDim2.new(1,-28,0,14); oSub.Position=UDim2.new(0,26,0,18)
+    oSub.BackgroundTransparency=1; oSub.Text=cat.sub; oSub.TextColor3=DARK.subtext
+    oSub.TextXAlignment=Enum.TextXAlignment.Left; oSub.Font=FONT; oSub.TextSize=9; oSub.ZIndex=102
+
+    local function refreshOpt()
+        local isSel=SelectedLuckCategories[cat.id]==true
+        chk.Text=isSel and "●" or "○"
+        chk.TextColor3=isSel and DARK.hAccent or DARK.subtext
+        oName.TextColor3=isSel and Color3.new(1,1,1) or DARK.text
+        opt.BackgroundTransparency=isSel and 0 or 1
+        opt.BackgroundColor3=isSel and DARK.itemSel or DARK.item
+    end
+    refreshOpt()
+    table.insert(refreshLuckOpts, refreshOpt)
+
+    opt.MouseButton1Click:Connect(function()
+        SelectedLuckCategories[cat.id]=not SelectedLuckCategories[cat.id]
+        refreshOpt()
+        updateLuckDropBtnText()
+    end)
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1.5)
+        pcall(function()
+            local activeMap = getActiveLuckInfo()
+            local activeParts = {}
+            for _, cat in ipairs(LUCK_CATEGORIES) do
+                local cur = activeMap[cat.id]
+                if cur and cur.remaining > 0 then
+                    table.insert(activeParts, cur.name .. " (" .. cur.remaining .. "s)")
+                end
+            end
+            if #activeParts > 0 then
+                lStatusLbl.Text = "Active: " .. table.concat(activeParts, ", ")
+                lStatusLbl.TextColor3 = Color3.fromRGB(80,255,160)
+            else
+                lStatusLbl.Text = "Active: ไม่มีน้ำยาทำงานอยู่ (Idle)"
+                lStatusLbl.TextColor3 = DARK.subtext
+            end
+
+            local counts, total = getLuckPotionsInInventory()
+            lSub.Text = "มีน้ำยาในกระเป๋า: " .. total .. " ชิ้น (เลือกเปิด/ปิดตามหมวด)"
+
+            if currentServerWeather and currentServerWeather.name then
+                local now = workspace:GetServerTimeNow()
+                local started = currentServerWeather.startedAt or now
+                local dur = currentServerWeather.duration or 300
+                local rem = math.max(0, math.floor(dur - (now - started)))
+                lEventLbl.Text = "🌟 Server Event: " .. tostring(currentServerWeather.name) .. " (เหลือ " .. rem .. "s)"
+                lEventLbl.TextColor3 = Color3.fromRGB(255,215,80)
+            else
+                lEventLbl.Text = "🌟 Server Event: ไม่มีอีเวนต์ในเซิร์ฟเวอร์ขณะนี้ (Idle)"
+                lEventLbl.TextColor3 = DARK.subtext
+            end
+
+            if CFG.AutoLuckOnEvent then
+                checkEventAutoLuck()
+            end
+        end)
+    end
+end)
+
+
+end
+setupRollTab()
 
 -- ── Skill tab ─────────────────────────────────────────────────────────────────
-makeToggle(pages["Skill"],"Auto Upgrade Skills","อัปเกรด Skill Tree ตามสายที่เลือกอัตโนมัติ", CFG.AutoUpgrade, function(v) CFG.AutoUpgrade=v end)
+local function setupSkillTab()
+makeCfgToggle(pages["Skill"],"AutoUpgrade","Auto Upgrade Skills","อัปเกรด Skill Tree ตามสายที่เลือกอัตโนมัติ")
 
 local skillDropCard=Instance.new("Frame",pages["Skill"])
 skillDropCard.Size=UDim2.new(1,0,0,52); skillDropCard.BackgroundColor3=DARK.item; skillDropCard.BorderSizePixel=0
@@ -1068,7 +1546,7 @@ sSub.Size=UDim2.new(1,-170,0,14); sSub.Position=UDim2.new(0,14,0,28)
 sSub.BackgroundTransparency=1; sSub.Text="เลือกสายสกิลที่ต้องการให้อัปเกรด (เลือกได้หลายสาย)"
 sSub.TextColor3=DARK.subtext; sSub.TextXAlignment=Enum.TextXAlignment.Left; sSub.Font=FONT; sSub.TextSize=10
 
-local skillDropBtn=Instance.new("TextButton",skillDropCard)
+skillDropBtn=Instance.new("TextButton",skillDropCard)
 skillDropBtn.Size=UDim2.new(0,145,0,28); skillDropBtn.Position=UDim2.new(1,-155,0.5,-14)
 skillDropBtn.BackgroundColor3=Color3.fromRGB(32,24,48); skillDropBtn.BorderSizePixel=0
 skillDropBtn.Text="Select Branches  ▾"; skillDropBtn.TextColor3=Color3.fromRGB(240,230,255)
@@ -1081,7 +1559,7 @@ local SKILL_ITEM_H = 30
 local SKILL_PADDING = 2
 local totalSkillHeight = #SKILL_BRANCHES * (SKILL_ITEM_H + SKILL_PADDING) + 10
 
-local skillDropMenu=Instance.new("ScrollingFrame",main)
+skillDropMenu=Instance.new("ScrollingFrame",main)
 skillDropMenu.Size=UDim2.new(0,210,0,math.min(180, totalSkillHeight))
 skillDropMenu.BackgroundColor3=DARK.dropdown
 skillDropMenu.BorderSizePixel=0; skillDropMenu.ScrollBarThickness=4
@@ -1095,7 +1573,7 @@ local sdPad=Instance.new("UIPadding",skillDropMenu)
 sdPad.PaddingTop=UDim.new(0,5); sdPad.PaddingBottom=UDim.new(0,5)
 sdPad.PaddingLeft=UDim.new(0,5); sdPad.PaddingRight=UDim.new(0,5)
 
-local function updateSkillDropBtnText()
+updateSkillDropBtnText = function()
     local count=0
     for _,sel in pairs(SelectedSkills) do if sel then count=count+1 end end
     if count==0 then
@@ -1121,6 +1599,7 @@ end
 
 skillDropBtn.MouseButton1Click:Connect(toggleSkillDropdown)
 
+refreshSkillOpts = {}
 for _, branch in ipairs(SKILL_BRANCHES) do
     local opt=Instance.new("TextButton",skillDropMenu)
     opt.Size=UDim2.new(1,0,0,SKILL_ITEM_H); opt.BackgroundColor3=DARK.item; opt.BackgroundTransparency=1
@@ -1151,11 +1630,16 @@ for _, branch in ipairs(SKILL_BRANCHES) do
         refreshOpt()
         updateSkillDropBtnText()
     end)
+    table.insert(refreshSkillOpts, refreshOpt)
     refreshOpt()
 end
 updateSkillDropBtnText()
 
+end
+setupSkillTab()
+
 -- ── Tower tab ─────────────────────────────────────────────────────────────────
+local function setupTowerTab()
 local towerBanner=Instance.new("Frame",pages["Tower"])
 towerBanner.Size=UDim2.new(1,0,0,52); towerBanner.BackgroundColor3=Color3.fromRGB(38,18,68); towerBanner.BorderSizePixel=0
 Instance.new("UICorner",towerBanner).CornerRadius=UDim.new(0,8)
@@ -1186,7 +1670,7 @@ dSub.Size=UDim2.new(1,-170,0,14); dSub.Position=UDim2.new(0,14,0,28)
 dSub.BackgroundTransparency=1; dSub.Text="เลือกหอคอยที่ต้องการลง (เลือกได้หลายหอคอย)"
 dSub.TextColor3=DARK.subtext; dSub.TextXAlignment=Enum.TextXAlignment.Left; dSub.Font=FONT; dSub.TextSize=10
 
-local dropBtn=Instance.new("TextButton",dropCard)
+dropBtn=Instance.new("TextButton",dropCard)
 dropBtn.Size=UDim2.new(0,145,0,28); dropBtn.Position=UDim2.new(1,-155,0.5,-14)
 dropBtn.BackgroundColor3=Color3.fromRGB(32,24,48); dropBtn.BorderSizePixel=0
 dropBtn.Text="Select Towers  ▾"; dropBtn.TextColor3=Color3.fromRGB(240,230,255)
@@ -1199,7 +1683,7 @@ local ITEM_H = 30
 local PADDING = 2
 local totalListHeight = #ALL_TOWERS * (ITEM_H + PADDING) + 10
 
-local dropMenu=Instance.new("ScrollingFrame",main)
+dropMenu=Instance.new("ScrollingFrame",main)
 dropMenu.Size=UDim2.new(0,210,0,math.min(180, totalListHeight))
 dropMenu.BackgroundColor3=DARK.dropdown
 dropMenu.BorderSizePixel=0; dropMenu.ScrollBarThickness=4
@@ -1213,7 +1697,7 @@ local dPad=Instance.new("UIPadding",dropMenu)
 dPad.PaddingTop=UDim.new(0,5); dPad.PaddingBottom=UDim.new(0,5)
 dPad.PaddingLeft=UDim.new(0,5); dPad.PaddingRight=UDim.new(0,5)
 
-local function updateDropBtnText()
+updateDropBtnText = function()
     local count=0
     for _,sel in pairs(SelectedTowers) do if sel then count=count+1 end end
     if count==0 then
@@ -1238,6 +1722,7 @@ end
 
 dropBtn.MouseButton1Click:Connect(toggleDropdown)
 
+refreshTowerOpts = {}
 for _, tower in ipairs(ALL_TOWERS) do
     local opt=Instance.new("TextButton",dropMenu)
     opt.Size=UDim2.new(1,0,0,ITEM_H); opt.BackgroundColor3=DARK.item; opt.BackgroundTransparency=1
@@ -1269,44 +1754,16 @@ for _, tower in ipairs(ALL_TOWERS) do
         refreshOpt()
         updateDropBtnText()
     end)
+    table.insert(refreshTowerOpts, refreshOpt)
+    refreshOpt()
 end
 
-main.InputBegan:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 then
-        local mPos=UIS:GetMouseLocation()
-        if dropMenu and dropMenu.Visible then
-            local dPos=dropMenu.AbsolutePosition
-            local dSize=dropMenu.AbsoluteSize
-            local bPos=dropBtn.AbsolutePosition
-            local bSize=dropBtn.AbsoluteSize
-            local inMenu = (mPos.X>=dPos.X and mPos.X<=dPos.X+dSize.X and mPos.Y>=dPos.Y and mPos.Y<=dPos.Y+dSize.Y)
-            local inBtn  = (mPos.X>=bPos.X and mPos.X<=bPos.X+bSize.X and mPos.Y>=bPos.Y and mPos.Y<=bPos.Y+bSize.Y)
-            if not inMenu and not inBtn then
-                dropMenu.Visible=false
-            end
-        end
-        if skillDropMenu and skillDropMenu.Visible then
-            local dPos=skillDropMenu.AbsolutePosition
-            local dSize=skillDropMenu.AbsoluteSize
-            local bPos=skillDropBtn.AbsolutePosition
-            local bSize=skillDropBtn.AbsoluteSize
-            local inMenu = (mPos.X>=dPos.X and mPos.X<=dPos.X+dSize.X and mPos.Y>=dPos.Y and mPos.Y<=dPos.Y+dSize.Y)
-            local inBtn  = (mPos.X>=bPos.X and mPos.X<=bPos.X+bSize.X and mPos.Y>=bPos.Y and mPos.Y<=bPos.Y+bSize.Y)
-            if not inMenu and not inBtn then
-                skillDropMenu.Visible=false
-            end
-        end
-    end
-end)
-
-makeToggle(pages["Tower"],"Loop Towers","วนลงหอคอยที่เลือกซ้ำเรื่อยๆ แบบอัตโนมัติ",
-    CFG.LoopTower, function(v)
-        CFG.LoopTower=v
+makeCfgToggle(pages["Tower"],"LoopTower","Loop Towers","วนลงหอคอยที่เลือกซ้ำเรื่อยๆ แบบอัตโนมัติ",
+    function(v)
         updateRunBtnText()
     end)
 
-makeToggle(pages["Tower"],"Equip Best Team First","สวมใส่ทีมที่ดีที่สุดก่อนเข้าหอคอยทุกรอบ",
-    CFG.EquipTeamBefore, function(v) CFG.EquipTeamBefore=v end)
+makeCfgToggle(pages["Tower"],"EquipTeamBefore","Equip Best Team First","สวมใส่ทีมที่ดีที่สุดก่อนเข้าหอคอยทุกรอบ")
 
 towerRunBtn=Instance.new("TextButton",pages["Tower"])
 towerRunBtn.Size=UDim2.new(1,0,0,52); towerRunBtn.BackgroundColor3=DARK.purple; towerRunBtn.BorderSizePixel=0
@@ -1322,18 +1779,531 @@ towerRunBtn.MouseButton1Click:Connect(function()
         startTowerQueue()
     end
 end)
+end
+setupTowerTab()
+
+-- Close dropdowns when clicking outside
+main.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 then
+        local mPos=UIS:GetMouseLocation()
+        if dropMenu and dropMenu.Visible and dropBtn then
+            local dPos=dropMenu.AbsolutePosition; local dSize=dropMenu.AbsoluteSize
+            local bPos=dropBtn.AbsolutePosition; local bSize=dropBtn.AbsoluteSize
+            if not ((mPos.X>=dPos.X and mPos.X<=dPos.X+dSize.X and mPos.Y>=dPos.Y and mPos.Y<=dPos.Y+dSize.Y) or
+                    (mPos.X>=bPos.X and mPos.X<=bPos.X+bSize.X and mPos.Y>=bPos.Y and mPos.Y<=bPos.Y+bSize.Y)) then
+                dropMenu.Visible=false
+            end
+        end
+        if skillDropMenu and skillDropMenu.Visible and skillDropBtn then
+            local dPos=skillDropMenu.AbsolutePosition; local dSize=skillDropMenu.AbsoluteSize
+            local bPos=skillDropBtn.AbsolutePosition; local bSize=skillDropBtn.AbsoluteSize
+            if not ((mPos.X>=dPos.X and mPos.X<=dPos.X+dSize.X and mPos.Y>=dPos.Y and mPos.Y<=dPos.Y+dSize.Y) or
+                    (mPos.X>=bPos.X and mPos.X<=bPos.X+bSize.X and mPos.Y>=bPos.Y and mPos.Y<=bPos.Y+bSize.Y)) then
+                skillDropMenu.Visible=false
+            end
+        end
+        if cfgDropMenu and cfgDropMenu.Visible and cfgDropBtn then
+            local dPos=cfgDropMenu.AbsolutePosition; local dSize=cfgDropMenu.AbsoluteSize
+            local bPos=cfgDropBtn.AbsolutePosition; local bSize=cfgDropBtn.AbsoluteSize
+            if not ((mPos.X>=dPos.X and mPos.X<=dPos.X+dSize.X and mPos.Y>=dPos.Y and mPos.Y<=dPos.Y+dSize.Y) or
+                    (mPos.X>=bPos.X and mPos.X<=bPos.X+bSize.X and mPos.Y>=bPos.Y and mPos.Y<=bPos.Y+bSize.Y)) then
+                cfgDropMenu.Visible=false
+            end
+        end
+        if luckDropMenu and luckDropMenu.Visible and luckDropBtn then
+            local dPos=luckDropMenu.AbsolutePosition; local dSize=luckDropMenu.AbsoluteSize
+            local bPos=luckDropBtn.AbsolutePosition; local bSize=luckDropBtn.AbsoluteSize
+            if not ((mPos.X>=dPos.X and mPos.X<=dPos.X+dSize.X and mPos.Y>=dPos.Y and mPos.Y<=dPos.Y+dSize.Y) or
+                    (mPos.X>=bPos.X and mPos.X<=bPos.X+bSize.X and mPos.Y>=bPos.Y and mPos.Y<=bPos.Y+bSize.Y)) then
+                luckDropMenu.Visible=false
+            end
+        end
+    end
+end)
 
 -- ── Utility tab ───────────────────────────────────────────────────────────────
-makeToggle(pages["Utility"],"AFK Super Saver (1+2+3)","กดทีเดียว: ปิด 3D จอขาว + ล้างขยะ RAM ทุก 60s + ปิดเสียง", CFG.SuperRAMSaver, function(v) toggleSuperRAMSaver(v) end)
-makeToggle(pages["Utility"],"Hide Game UI (4)","ซ่อน UI เกมทั้งหมด (ยกเว้น Cheat Hub) ลดภาระ CPU/RAM", CFG.HideGameUI, function(v) toggleHideGameUI(v) end)
-makeToggle(pages["Utility"],"Disable 3D Rendering","ปิดภาพ 3D (จอขาว) ประหยัด CPU & RAM เหมาะกับ AFK", CFG.Disable3DRender, function(v) toggle3DRendering(v) end)
-makeToggle(pages["Utility"],"Boost FPS","ลดเอฟเฟกต์/กราฟิกและแสงเงา เพิ่มความลื่นไหลและ FPS", CFG.BoostFPS, function(v) toggleBoostFPS(v) end)
-makeToggle(pages["Utility"],"Anti AFK","ป้องกันการหลุดจากการอยู่เฉยๆ (กด F13 อัตโนมัติ)", CFG.AntiAFK, function(v) CFG.AntiAFK=v end)
-makeToggle(pages["Utility"],"Auto Claim Quests","รับของรางวัลเควสทั้งหมดอัตโนมัติ", CFG.AutoQuest, function(v) CFG.AutoQuest=v end)
+local function setupUtilityTab()
+
+makeCfgToggle(pages["Utility"],"SuperRAMSaver","AFK Super Saver (1+2+3)","กดทีเดียว: ปิด 3D จอขาว + ล้างขยะ RAM ทุก 60s + ปิดเสียง", function(v) toggleSuperRAMSaver(v) end)
+makeCfgToggle(pages["Utility"],"HideGameUI","Hide Game UI (4)","ซ่อน UI เกมทั้งหมด (ยกเว้น Cheat Hub) ลดภาระ CPU/RAM", function(v) toggleHideGameUI(v) end)
+makeCfgToggle(pages["Utility"],"Disable3DRender","Disable 3D Rendering","ปิดภาพ 3D (จอขาว) ประหยัด CPU & RAM เหมาะกับ AFK", function(v) toggle3DRendering(v) end)
+makeCfgToggle(pages["Utility"],"BoostFPS","Boost FPS","ลดเอฟเฟกต์/กราฟิกและแสงเงา เพิ่มความลื่นไหลและ FPS", function(v) toggleBoostFPS(v) end)
+makeCfgToggle(pages["Utility"],"AntiAFK","Anti AFK","ป้องกันการหลุดจากการอยู่เฉยๆ (กด F13 อัตโนมัติ)")
+makeCfgToggle(pages["Utility"],"AutoQuest","Auto Claim Quests","รับของรางวัลเควสทั้งหมดอัตโนมัติ")
+
+end
+setupUtilityTab()
+
+-- ── Misc tab (Config Manager) ────────────────────────────────────────────────
+local function setupMiscTab()
+    local CONFIG_FOLDER = "540Cheats_Configs"
+    local AUTOLOAD_FILE = CONFIG_FOLDER .. "/autoload.txt"
+    local INDEX_FILE    = CONFIG_FOLDER .. "/_index.json"
+
+    local function fileWrite(path, content)
+        if writefile then return pcall(writefile, path, content) end
+        return false
+    end
+
+    local function fileRead(path)
+        if readfile then
+            local ok, res = pcall(readfile, path)
+            if ok then return res end
+        end
+        return nil
+    end
+
+    local function fileExists(path)
+        if isfile then
+            local ok, res = pcall(isfile, path)
+            return ok and res == true
+        end
+        return false
+    end
+
+    local function fileDelete(path)
+        if delfile then return pcall(delfile, path) end
+        return false
+    end
+
+    local function folderExists(path)
+        if isfolder then
+            local ok, res = pcall(isfolder, path)
+            return ok and res == true
+        end
+        return false
+    end
+
+    local function folderMake(path)
+        if makefolder then return pcall(makefolder, path) end
+        return false
+    end
+
+    local function getFileList(folder)
+        if listfiles then
+            local ok, res = pcall(listfiles, folder)
+            if ok and type(res) == "table" then return res end
+        end
+        return {}
+    end
+
+    local function readIndex()
+        local content = fileRead(INDEX_FILE)
+        if content then
+            local ok, parsed = pcall(function() return HttpService:JSONDecode(content) end)
+            if ok and type(parsed) == "table" then return parsed end
+        end
+        return {}
+    end
+
+    local function saveIndex(idxList)
+        local ok, encoded = pcall(function() return HttpService:JSONEncode(idxList) end)
+        if ok then fileWrite(INDEX_FILE, encoded) end
+    end
+
+    local function getAllConfigs()
+        if not folderExists(CONFIG_FOLDER) then folderMake(CONFIG_FOLDER) end
+        local set = {}
+        for _, f in ipairs(getFileList(CONFIG_FOLDER)) do
+            local clean = f:gsub("\\", "/")
+            local name = clean:match(".*/(.*)%.json$") or clean:match("^(.*)%.json$")
+            if name and not name:match("^_") and name ~= "autoload" then
+                set[name] = true
+            end
+        end
+        for _, name in ipairs(readIndex()) do
+            if fileExists(CONFIG_FOLDER .. "/" .. name .. ".json") then
+                set[name] = true
+            end
+        end
+        local result = {}
+        for name in pairs(set) do table.insert(result, name) end
+        table.sort(result)
+        return result
+    end
+
+    local function addConfigToIndex(cfgName)
+        local idx = readIndex()
+        for _, n in ipairs(idx) do
+            if n == cfgName then return end
+        end
+        table.insert(idx, cfgName)
+        saveIndex(idx)
+    end
+
+    local function removeConfigFromIndex(cfgName)
+        local newIdx = {}
+        for _, n in ipairs(readIndex()) do
+            if n ~= cfgName then table.insert(newIdx, n) end
+        end
+        saveIndex(newIdx)
+    end
+
+    local function getAutoloadConfig()
+        if fileExists(AUTOLOAD_FILE) then
+            local content = fileRead(AUTOLOAD_FILE)
+            if content then
+                local clean = content:gsub("%s+", "")
+                if clean ~= "" then return clean end
+            end
+        end
+        return nil
+    end
+
+    local function setAutoloadConfig(name)
+        if not name or name == "" then return false end
+        if not folderExists(CONFIG_FOLDER) then folderMake(CONFIG_FOLDER) end
+        return fileWrite(AUTOLOAD_FILE, name)
+    end
+
+    local function clearAutoloadConfig()
+        if fileExists(AUTOLOAD_FILE) then fileDelete(AUTOLOAD_FILE) end
+    end
+
+    local function syncAllUI()
+        for k, info in pairs(registeredToggles) do
+            if CFG[k] ~= nil then
+                pcall(info.set, CFG[k])
+                if info.cb then pcall(info.cb, CFG[k]) end
+            end
+        end
+        if plotLvlBox and CFG.PlotTargetLvl then plotLvlBox.Text = tostring(CFG.PlotTargetLvl) end
+        if setPlotMode and CFG.PlotUpgradeMode then setPlotMode(CFG.PlotUpgradeMode) end
+        for _, ref in ipairs(refreshSkillOpts) do pcall(ref) end
+        if updateSkillDropBtnText then pcall(updateSkillDropBtnText) end
+        for _, ref in ipairs(refreshTowerOpts) do pcall(ref) end
+        if updateDropBtnText then pcall(updateDropBtnText) end
+        if updateRunBtnText then pcall(updateRunBtnText) end
+        for _, ref in ipairs(refreshLuckOpts or {}) do pcall(ref) end
+        if updateLuckDropBtnText then pcall(updateLuckDropBtnText) end
+    end
+
+    local function saveConfig(name)
+        if not name or name:gsub("%s+", "") == "" then
+            showNotif("กรุณาใส่ชื่อ Config ก่อนบันทึก")
+            return false
+        end
+        name = name:gsub("[^%w_%-]", "")
+        if name == "" then
+            showNotif("ชื่อ Config มีตัวอักษรที่ไม่อนุญาต")
+            return false
+        end
+        if not folderExists(CONFIG_FOLDER) then folderMake(CONFIG_FOLDER) end
+        local ok, encoded = pcall(function()
+            return HttpService:JSONEncode({
+                CFG = CFG,
+                SelectedSkills = SelectedSkills,
+                SelectedTowers = SelectedTowers,
+                SelectedLuckCategories = SelectedLuckCategories,
+                Version = "v24",
+            })
+        end)
+        if not ok then
+            showNotif("เกิดข้อผิดพลาดในการแปลง JSON")
+            return false
+        end
+        local wrote = fileWrite(CONFIG_FOLDER .. "/" .. name .. ".json", encoded)
+        if wrote then
+            addConfigToIndex(name)
+            showNotif("บันทึก Config: " .. name .. " เรียบร้อย ✓")
+            return true
+        else
+            showNotif("ไม่สามารถเขียนไฟล์ได้ (Executor ไม่อนุญาต)")
+            return false
+        end
+    end
+
+    local function loadConfig(name)
+        if not name or name == "" then
+            showNotif("กรุณาเลือก Config ที่จะโหลด")
+            return false
+        end
+        local filePath = CONFIG_FOLDER .. "/" .. name .. ".json"
+        if not fileExists(filePath) then
+            showNotif("ไม่พบไฟล์ Config: " .. name)
+            return false
+        end
+        local content = fileRead(filePath)
+        if not content or content == "" then
+            showNotif("ไฟล์ Config ว่างเปล่า")
+            return false
+        end
+        local ok, data = pcall(function() return HttpService:JSONDecode(content) end)
+        if not ok or type(data) ~= "table" then
+            showNotif("อ่านข้อมูล Config ไม่สำเร็จ")
+            return false
+        end
+        if data.CFG and type(data.CFG) == "table" then
+            for k, v in pairs(data.CFG) do
+                if CFG[k] ~= nil then CFG[k] = v end
+            end
+        end
+        if data.SelectedSkills and type(data.SelectedSkills) == "table" then
+            for k, _ in pairs(SelectedSkills) do SelectedSkills[k] = false end
+            for k, v in pairs(data.SelectedSkills) do SelectedSkills[k] = v end
+        end
+        if data.SelectedTowers and type(data.SelectedTowers) == "table" then
+            for k, _ in pairs(SelectedTowers) do SelectedTowers[k] = false end
+            for k, v in pairs(data.SelectedTowers) do SelectedTowers[k] = v end
+        end
+        if data.SelectedLuckCategories and type(data.SelectedLuckCategories) == "table" then
+            for k, _ in pairs(SelectedLuckCategories) do SelectedLuckCategories[k] = false end
+            for k, v in pairs(data.SelectedLuckCategories) do SelectedLuckCategories[k] = v end
+        end
+        syncAllUI()
+        showNotif("โหลด Config: " .. name .. " สำเร็จ ✓")
+        return true
+    end
+
+    local function deleteConfig(name)
+        if not name or name == "" then
+            showNotif("กรุณาเลือก Config ที่จะลบ")
+            return false
+        end
+        local filePath = CONFIG_FOLDER .. "/" .. name .. ".json"
+        if fileExists(filePath) then fileDelete(filePath) end
+        removeConfigFromIndex(name)
+        if getAutoloadConfig() == name then clearAutoloadConfig() end
+        showNotif("ลบ Config: " .. name .. " เรียบร้อย")
+        return true
+    end
+
+    -- ── Misc UI Elements ──────────────────────────────────────────────────────────
+    local function addCard(h)
+        local f = Instance.new("Frame", pages["Misc"])
+        f.Size = UDim2.new(1,0,0,h); f.BackgroundColor3 = DARK.item; f.BorderSizePixel = 0
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0,8)
+        return f
+    end
+
+    local function addCardText(card, title, sub)
+        local t = Instance.new("TextLabel", card)
+        t.Size = UDim2.new(1,-170,0,18); t.Position = UDim2.new(0,14,0,8)
+        t.BackgroundTransparency = 1; t.Text = title; t.TextColor3 = DARK.text
+        t.TextXAlignment = Enum.TextXAlignment.Left; t.Font = FONT; t.TextSize = 12
+        if sub then
+            local s = Instance.new("TextLabel", card)
+            s.Size = UDim2.new(1,-170,0,14); s.Position = UDim2.new(0,14,0,28)
+            s.BackgroundTransparency = 1; s.Text = sub; s.TextColor3 = DARK.subtext
+            s.TextXAlignment = Enum.TextXAlignment.Left; s.Font = FONT; s.TextSize = 10
+            return s
+        end
+    end
+
+    local mh = addCard(52)
+    local mhT = Instance.new("TextLabel", mh)
+    mhT.Size = UDim2.new(1,-20,0,18); mhT.Position = UDim2.new(0,14,0,8); mhT.BackgroundTransparency = 1; mhT.Text = "Config System (Profile Manager)"; mhT.TextColor3 = DARK.text; mhT.TextXAlignment = Enum.TextXAlignment.Left; mhT.Font = FONT; mhT.TextSize = 12
+    local mhS = Instance.new("TextLabel", mh)
+    mhS.Size = UDim2.new(1,-20,0,14); mhS.Position = UDim2.new(0,14,0,28); mhS.BackgroundTransparency = 1; mhS.Text = "บันทึก โหลด ลบ และตั้งค่า Autoload การตั้งค่าทั้งหมด"; mhS.TextColor3 = DARK.subtext; mhS.TextXAlignment = Enum.TextXAlignment.Left; mhS.Font = FONT; mhS.TextSize = 10
+
+    local nc = addCard(52)
+    addCardText(nc, "Config Name", "พิมพ์ชื่อโปรไฟล์ที่ต้องการบันทึก")
+    local cfgNameBox = Instance.new("TextBox", nc)
+    cfgNameBox.Size = UDim2.new(0,145,0,28); cfgNameBox.Position = UDim2.new(1,-155,0.5,-14)
+    cfgNameBox.BackgroundColor3 = Color3.fromRGB(32,24,48); cfgNameBox.BorderSizePixel = 0
+    cfgNameBox.Text = "default"; cfgNameBox.TextColor3 = Color3.fromRGB(240,230,255)
+    cfgNameBox.Font = FONT; cfgNameBox.TextSize = 11; cfgNameBox.ClearTextOnFocus = false
+    Instance.new("UICorner", cfgNameBox).CornerRadius = UDim.new(0,6)
+    Instance.new("UIStroke", cfgNameBox).Color = DARK.purple
+
+    local dc = addCard(52)
+    addCardText(dc, "Select Profile", "เลือกไฟล์คอนฟิกจากรายการที่มี")
+    cfgDropBtn = Instance.new("TextButton", dc)
+    cfgDropBtn.Size = UDim2.new(0,145,0,28); cfgDropBtn.Position = UDim2.new(1,-155,0.5,-14)
+    cfgDropBtn.BackgroundColor3 = Color3.fromRGB(32,24,48); cfgDropBtn.BorderSizePixel = 0
+    cfgDropBtn.Text = "Select Config  ▾"; cfgDropBtn.TextColor3 = Color3.fromRGB(240,230,255)
+    cfgDropBtn.Font = FONT; cfgDropBtn.TextSize = 11
+    Instance.new("UICorner", cfgDropBtn).CornerRadius = UDim.new(0,6)
+    Instance.new("UIStroke", cfgDropBtn).Color = DARK.purple
+
+    local selectedConfig = "default"
+
+    cfgDropMenu = Instance.new("ScrollingFrame", main)
+    cfgDropMenu.Size = UDim2.new(0,180,0,140); cfgDropMenu.BackgroundColor3 = DARK.dropdown
+    cfgDropMenu.BorderSizePixel = 0; cfgDropMenu.ScrollBarThickness = 4
+    cfgDropMenu.ScrollBarImageColor3 = DARK.purple; cfgDropMenu.Visible = false; cfgDropMenu.ZIndex = 110
+    Instance.new("UICorner", cfgDropMenu).CornerRadius = UDim.new(0,8)
+    Instance.new("UIStroke", cfgDropMenu).Color = DARK.border
+    Instance.new("UIListLayout", cfgDropMenu).Padding = UDim.new(0,2)
+    local cdmPad = Instance.new("UIPadding", cfgDropMenu)
+    cdmPad.PaddingTop = UDim.new(0,4); cdmPad.PaddingBottom = UDim.new(0,4)
+    cdmPad.PaddingLeft = UDim.new(0,4); cdmPad.PaddingRight = UDim.new(0,4)
+
+    local function populateConfigDropdown()
+        for _, ch in ipairs(cfgDropMenu:GetChildren()) do
+            if ch:IsA("TextButton") or ch:IsA("TextLabel") then ch:Destroy() end
+        end
+        local configs = getAllConfigs()
+        if #configs == 0 then
+            local emptyLbl = Instance.new("TextLabel", cfgDropMenu)
+            emptyLbl.Size = UDim2.new(1,0,0,28); emptyLbl.BackgroundTransparency = 1
+            emptyLbl.Text = "No configs found"; emptyLbl.TextColor3 = DARK.subtext
+            emptyLbl.Font = FONT; emptyLbl.TextSize = 10; emptyLbl.ZIndex = 111
+            cfgDropMenu.CanvasSize = UDim2.new(0,0,0,32)
+            return
+        end
+        cfgDropMenu.CanvasSize = UDim2.new(0,0,0,#configs * 30 + 8)
+        for _, cName in ipairs(configs) do
+            local b = Instance.new("TextButton", cfgDropMenu)
+            b.Size = UDim2.new(1,0,0,28); b.BackgroundColor3 = (selectedConfig == cName) and DARK.itemSel or DARK.item
+            b.BackgroundTransparency = (selectedConfig == cName) and 0 or 1
+            b.BorderSizePixel = 0; b.Text = "  " .. cName
+            b.TextColor3 = (selectedConfig == cName) and DARK.hAccent or DARK.text
+            b.TextXAlignment = Enum.TextXAlignment.Left; b.Font = FONT; b.TextSize = 11; b.ZIndex = 111
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+            b.MouseButton1Click:Connect(function()
+                selectedConfig = cName
+                cfgDropBtn.Text = cName .. "  ▾"
+                cfgDropBtn.TextColor3 = DARK.hAccent
+                cfgNameBox.Text = cName
+                cfgDropMenu.Visible = false
+            end)
+        end
+    end
+
+    cfgDropBtn.MouseButton1Click:Connect(function()
+        if cfgDropMenu.Visible then
+            cfgDropMenu.Visible = false
+        else
+            if dropMenu then dropMenu.Visible = false end
+            if skillDropMenu then skillDropMenu.Visible = false end
+            populateConfigDropdown()
+            local absPos = cfgDropBtn.AbsolutePosition
+            local mainPos = main.AbsolutePosition
+            cfgDropMenu.Position = UDim2.new(0, absPos.X - mainPos.X - 35, 0, absPos.Y - mainPos.Y + 32)
+            cfgDropMenu.Visible = true
+        end
+    end)
+
+    local btnRow = Instance.new("Frame", pages["Misc"])
+    btnRow.Size = UDim2.new(1,0,0,36); btnRow.BackgroundTransparency = 1
+    local brL = Instance.new("UIListLayout", btnRow)
+    brL.FillDirection = Enum.FillDirection.Horizontal; brL.Padding = UDim.new(0,8)
+
+    local btnBg = Color3.fromRGB(32,24,48)
+    local btnFont = Enum.Font.SourceSans
+    local btnSize = 13
+
+    local saveBtn = Instance.new("TextButton", btnRow)
+    saveBtn.Size = UDim2.new(0.32, -4, 1, 0); saveBtn.BackgroundColor3 = btnBg; saveBtn.BorderSizePixel = 0
+    saveBtn.Text = "💾 Save Config"; saveBtn.TextColor3 = Color3.fromRGB(220,220,235); saveBtn.Font = btnFont; saveBtn.TextSize = btnSize
+    Instance.new("UICorner", saveBtn).CornerRadius = UDim.new(0,8)
+    Instance.new("UIStroke", saveBtn).Color = DARK.border
+
+    local loadBtn = Instance.new("TextButton", btnRow)
+    loadBtn.Size = UDim2.new(0.32, -4, 1, 0); loadBtn.BackgroundColor3 = btnBg; loadBtn.BorderSizePixel = 0
+    loadBtn.Text = "📂 Load Config"; loadBtn.TextColor3 = Color3.fromRGB(220,220,235); loadBtn.Font = btnFont; loadBtn.TextSize = btnSize
+    Instance.new("UICorner", loadBtn).CornerRadius = UDim.new(0,8)
+    Instance.new("UIStroke", loadBtn).Color = DARK.border
+
+    local delBtn = Instance.new("TextButton", btnRow)
+    delBtn.Size = UDim2.new(0.36, -8, 1, 0); delBtn.BackgroundColor3 = btnBg; delBtn.BorderSizePixel = 0
+    delBtn.Text = "🗑️ Delete Config"; delBtn.TextColor3 = Color3.fromRGB(220,220,235); delBtn.Font = btnFont; delBtn.TextSize = btnSize
+    Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0,8)
+    Instance.new("UIStroke", delBtn).Color = DARK.border
+
+    local ac = addCard(56)
+    local acS = addCardText(ac, "⚡ Autoload on Startup", "Active: None")
+
+    local function refreshAutoloadStatus()
+        local cur = getAutoloadConfig()
+        if cur and cur ~= "" then
+            acS.Text = "Active: " .. cur
+            acS.TextColor3 = DARK.hAccent
+        else
+            acS.Text = "Active: None (ปิดอยู่)"
+            acS.TextColor3 = DARK.subtext
+        end
+    end
+    refreshAutoloadStatus()
+
+    local setAutoBtn = Instance.new("TextButton", ac)
+    setAutoBtn.Size = UDim2.new(0,80,0,28); setAutoBtn.Position = UDim2.new(1,-155,0.5,-14)
+    setAutoBtn.BackgroundColor3 = btnBg; setAutoBtn.BorderSizePixel = 0
+    setAutoBtn.Text = "Set Auto"; setAutoBtn.TextColor3 = Color3.fromRGB(220,220,235); setAutoBtn.Font = btnFont; setAutoBtn.TextSize = btnSize
+    Instance.new("UICorner", setAutoBtn).CornerRadius = UDim.new(0,6)
+    Instance.new("UIStroke", setAutoBtn).Color = DARK.border
+
+    local clearAutoBtn = Instance.new("TextButton", ac)
+    clearAutoBtn.Size = UDim2.new(0,60,0,28); clearAutoBtn.Position = UDim2.new(1,-68,0.5,-14)
+    clearAutoBtn.BackgroundColor3 = btnBg; clearAutoBtn.BorderSizePixel = 0
+    clearAutoBtn.Text = "Clear"; clearAutoBtn.TextColor3 = Color3.fromRGB(220,220,235); clearAutoBtn.Font = btnFont; clearAutoBtn.TextSize = btnSize
+    Instance.new("UICorner", clearAutoBtn).CornerRadius = UDim.new(0,6)
+    Instance.new("UIStroke", clearAutoBtn).Color = DARK.border
+
+    saveBtn.MouseButton1Click:Connect(function()
+        local name = cfgNameBox.Text
+        if saveConfig(name) then
+            selectedConfig = name:gsub("[^%w_%-]", "")
+            cfgDropBtn.Text = selectedConfig .. "  ▾"
+            cfgDropBtn.TextColor3 = DARK.hAccent
+            populateConfigDropdown()
+        end
+    end)
+
+    loadBtn.MouseButton1Click:Connect(function()
+        local name = (cfgNameBox.Text ~= "" and cfgNameBox.Text) or selectedConfig
+        loadConfig(name)
+    end)
+
+    delBtn.MouseButton1Click:Connect(function()
+        local name = (cfgNameBox.Text ~= "" and cfgNameBox.Text) or selectedConfig
+        if deleteConfig(name) then
+            selectedConfig = ""
+            cfgDropBtn.Text = "Select Config  ▾"
+            cfgDropBtn.TextColor3 = Color3.fromRGB(240,230,255)
+            cfgNameBox.Text = ""
+            refreshAutoloadStatus()
+            populateConfigDropdown()
+        end
+    end)
+
+    setAutoBtn.MouseButton1Click:Connect(function()
+        local name = (cfgNameBox.Text ~= "" and cfgNameBox.Text) or selectedConfig
+        if not name or name == "" then
+            showNotif("กรุณาเลือกหรือใส่ชื่อ Config ก่อน")
+            return
+        end
+        if not fileExists(CONFIG_FOLDER .. "/" .. name .. ".json") then
+            saveConfig(name)
+        end
+        setAutoloadConfig(name)
+        refreshAutoloadStatus()
+    end)
+
+    clearAutoBtn.MouseButton1Click:Connect(function()
+        clearAutoloadConfig()
+        refreshAutoloadStatus()
+    end)
+
+    local miscInfo = Instance.new("TextLabel", pages["Misc"])
+    miscInfo.Size = UDim2.new(1,0,0,76); miscInfo.BackgroundColor3 = DARK.item; miscInfo.BorderSizePixel = 0
+    miscInfo.Text = "  [Config Info]\n" ..
+        "  • โฟลเดอร์: 540Cheats_Configs/<name>.json\n" ..
+        "  • บันทึกค่า: ฟังก์ชันทั้งหมด, หอคอยที่เลือก, สกิลที่เลือก\n" ..
+        "  • Autoload: เมื่อตั้งไว้ จะดึงค่าคอนฟิกนี้มาเปิดทันทีที่รันสคริปต์"
+    miscInfo.TextColor3 = DARK.subtext; miscInfo.TextXAlignment = Enum.TextXAlignment.Left
+    miscInfo.TextYAlignment = Enum.TextYAlignment.Center; miscInfo.Font = FONT; miscInfo.TextSize = 11
+    Instance.new("UICorner", miscInfo).CornerRadius = UDim.new(0,8)
+
+    task.spawn(function()
+        task.wait(0.5)
+        local auto = getAutoloadConfig()
+        if auto and auto ~= "" then
+            local path = CONFIG_FOLDER .. "/" .. auto .. ".json"
+            if fileExists(path) then
+                loadConfig(auto)
+                pcall(function() showNotif("Autoloaded Config: " .. auto) end)
+            end
+        end
+    end)
+end
+setupMiscTab()
 
 -- ── Settings tab ──────────────────────────────────────────────────────────────
+do
 local info=Instance.new("TextLabel",pages["Settings"])
-info.Size=UDim2.new(1,0,0,380); info.BackgroundColor3=DARK.item; info.BorderSizePixel=0
+info.Size=UDim2.new(1,0,0,450); info.BackgroundColor3=DARK.item; info.BorderSizePixel=0
 info.Text="  CHEAT HUB v24\n\n" ..
     "  Main\n" ..
     "  Auto Collect        — 15 slots\n" ..
@@ -1342,7 +2312,9 @@ info.Text="  CHEAT HUB v24\n\n" ..
     "  Auto Upgrade Skills — no notification spam\n\n" ..
     "  Roll\n" ..
     "  Auto Roll           — 2.6s per roll\n" ..
-    "  Auto Rebirth        — on threshold\n\n" ..
+    "  Auto Rebirth        — on threshold\n" ..
+    "  Auto Use Luck       — 19 potions auto-buff maintain\n" ..
+    "  Auto Luck on Event  — auto burst best luck on Luck Event\n\n" ..
     "  Tower\n" ..
     "  Dropdown Menu       — clean multi-selection popup\n" ..
     "  Loop Mode           — repeat selected towers endlessly\n" ..
@@ -1355,12 +2327,19 @@ info.Text="  CHEAT HUB v24\n\n" ..
     "  Boost FPS           — remove shadows/particles/materials\n" ..
     "  Anti AFK            — F13 every 60s\n" ..
     "  Auto Quest          — Daily & Weekly\n\n" ..
+    "  Misc (Config)\n" ..
+    "  Save Profile        — save current settings as name\n" ..
+    "  Load Profile        — load and auto-sync all UI\n" ..
+    "  Delete Profile      — remove saved config file\n" ..
+    "  Autoload            — automatically load on startup\n\n" ..
     "  Hotkeys\n" ..
     "  E=Collect  Q=Roll  X=UI  F1=Show"
 info.TextColor3=DARK.text; info.TextXAlignment=Enum.TextXAlignment.Left
 info.TextYAlignment=Enum.TextYAlignment.Top; info.Font=FONT; info.TextSize=12
 Instance.new("UICorner",info).CornerRadius=UDim.new(0,8)
+end
 
+do
 minimizedLogo=Instance.new("TextButton",gui)
 minimizedLogo.Size=UDim2.new(0,50,0,50); minimizedLogo.Position=UDim2.new(0.5,-25,0.5,-25)
 minimizedLogo.BackgroundColor3=DARK.bg; minimizedLogo.BackgroundTransparency=0.2
@@ -1378,20 +2357,6 @@ wm.BackgroundTransparency=1; wm.Text="CHEAT HUB | discord.gg/540shop"
 wm.TextColor3=DARK.accent; wm.TextXAlignment=Enum.TextXAlignment.Right
 wm.Font=FONT; wm.TextSize=14; wm.TextTransparency=0.2
 wm.TextStrokeTransparency=0.4; wm.TextStrokeColor3=Color3.new(0,0,0)
-
-notif=Instance.new("TextLabel",gui)
-notif.Size=UDim2.new(0,300,0,32); notif.Position=UDim2.new(0.5,-150,0,-40)
-notif.BackgroundColor3=DARK.bg; notif.BackgroundTransparency=0.15
-notif.TextColor3=DARK.accent; notif.Font=FONT; notif.TextSize=13; notif.Visible=false
-Instance.new("UICorner",notif).CornerRadius=UDim.new(0,8)
-Instance.new("UIStroke",notif).Color=DARK.accent
-
-showNotif = function(text)
-    notif.Text="  > "..text; notif.Visible=true
-    TweenService:Create(notif,TweenInfo.new(0.3),{Position=UDim2.new(0.5,-150,0,20)}):Play()
-    task.delay(1.5,function()
-        TweenService:Create(notif,TweenInfo.new(0.3),{Position=UDim2.new(0.5,-150,0,-40)}):Play()
-        task.wait(0.4); notif.Visible=false end)
 end
 
 UIS.InputBegan:Connect(function(i,g)
@@ -1410,3 +2375,4 @@ end)
 
 print("[CHEAT HUB v24] พร้อมใช้งาน ✓")
 pcall(function() showNotif("CHEAT HUB v24 พร้อมใช้งานแล้ว") end)
+
