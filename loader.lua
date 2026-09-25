@@ -714,7 +714,12 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
 
     pcall(function()
         local MenuController = require(RS.Framework.Features.UI.MenuController)
-        if MenuController and MenuController.CloseMenu then MenuController.CloseMenu() end
+        local tr = UIReferences and UIReferences.Menus and UIReferences.Menus.TowerRewards
+        local pt = UIReferences and UIReferences.Root and UIReferences.Root.Menus and UIReferences.Root.Menus.PlayTower
+        local active = MenuController and MenuController.ActiveMenu and MenuController.ActiveMenu()
+        if active and (active == tr or active == pt) then
+            MenuController.CloseMenu()
+        end
     end)
 
     if TowerScreen then TowerScreen.Visible = false end
@@ -866,7 +871,12 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
     task.spawn(function()
         pcall(function()
             local MenuController = require(RS.Framework.Features.UI.MenuController)
-            if MenuController and MenuController.CloseMenu then MenuController.CloseMenu() end
+            local tr = UIReferences and UIReferences.Menus and UIReferences.Menus.TowerRewards
+            local pt = UIReferences and UIReferences.Root and UIReferences.Root.Menus and UIReferences.Root.Menus.PlayTower
+            local active = MenuController and MenuController.ActiveMenu and MenuController.ActiveMenu()
+            if active and (active == tr or active == pt) then
+                MenuController.CloseMenu()
+            end
         end)
         pcall(function()
             HUDController.showAll("inTower")
@@ -920,6 +930,11 @@ local function startTowerQueue()
         CFG.AutoTowerQueue = false
         isTowerBusy = false
         updateRunBtnText()
+        pcall(function()
+            if HiddenBtn then
+                HiddenBtn.Position = UDim2.fromScale(0.5, 0.76)
+            end
+        end)
 
         setBanner("✅ Completed All Rounds", "ลงเสร็จสิ้นทุกรอบแล้ว พร้อมเริ่มใหม่")
     end)
@@ -932,6 +947,11 @@ local function stopTowerQueue()
         _towerQueueThread = nil
     end
     pcall(function() CancelTower:InvokeServer() end)
+    pcall(function()
+        if HiddenBtn then
+            HiddenBtn.Position = UDim2.fromScale(0.5, 0.76)
+        end
+    end)
     isTowerBusy = false
     updateRunBtnText()
 
