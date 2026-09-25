@@ -254,8 +254,6 @@ local CFG = {
     SkipCutscene     = true,
     AutoRebirth            = false,
     AntiAFK                = true,
-    AutoReconnect          = true,
-    ReconnectDelay         = 5,
     AutoClaimRewards       = false,
     AutoQuest              = false,
     AutoBuyDice            = false,
@@ -1660,160 +1658,15 @@ end end)
 task.spawn(function() while true do task.wait(2)
     if CFG.AutoUseLuck then pcall(autoUseLuckPotions) end
 end end)
--- ── Smart Anti-AFK & Auto Reconnect / Server Hop ────────────────────────────
-local function queueScriptOnTeleport(scriptStr)
-    local qot = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
-    if qot and type(scriptStr) == "string" and scriptStr ~= "" then
-        pcall(qot, scriptStr)
-    end
-end
-
-local function reconnectCurrentServer()
-    showNotif("กำลังเชื่อมต่อเซิร์ฟเวอร์เดิมใหม่...")
-    task.wait(1)
-    local ok = pcall(function()
-        if #Players:GetPlayers() <= 1 then
-            TeleportService:Teleport(game.PlaceId, LP)
-        else
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
-        end
-    end)
-    if not ok then
-        pcall(function() TeleportService:Teleport(game.PlaceId, LP) end)
-    end
-end
-
-local function serverHop()
-    showNotif("กำลังค้นหาเซิร์ฟเวอร์ใหม่ (Server Hop)...")
-    task.spawn(function()
-        local placeId = game.PlaceId
-        local curJob = game.JobId
-        local serversUrl = string.format("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Desc&limit=100", tostring(placeId))
-
-        local req = getHttpRequestFunc()
-        local serverList = {}
-
-        if req then
-            local ok, res = pcall(function()
-                return req({ Url = serversUrl, Method = "GET" })
-            end)
-            if ok and res and res.Body then
-                local okDec, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
-                if okDec and data and data.data then
-                    for _, s in ipairs(data.data) do
-                        if type(s) == "table" and s.id and s.id ~= curJob and s.playing and s.maxPlayers and s.playing < s.maxPlayers then
-                            table.insert(serverList, s.id)
-                        end
-                    end
-                end
-            end
-        end
-
-        if #serverList > 0 then
-            local targetId = serverList[math.random(1, #serverList)]
-            showNotif("พบเซิร์ฟเวอร์ใหม่แล้ว กำลังวาร์ป...")
-            task.wait(0.5)
-            pcall(function()
-                TeleportService:TeleportToPlaceInstance(placeId, targetId, LP)
-            end)
-        else
-            showNotif("ไม่พบเซิร์ฟเวอร์เฉพาะ กำลังวาร์ปสุ่มเซิร์ฟเวอร์...")
-            task.wait(0.5)
-            pcall(function()
-                TeleportService:Teleport(placeId, LP)
-            end)
-        end
-    end)
-end
-
--- Smart Anti-AFK (VirtualUser + Idled signal + F13 Fallback)
-pcall(function()
-    LP.Idled:Connect(function()
-        if CFG.AntiAFK then
-            pcall(function()
-                if VirtualUser then
-                    VirtualUser:CaptureController()
-                    VirtualUser:ClickButton2(Vector2.new(0, 0))
-                else
-                    VIM:SendKeyEvent(true, Enum.KeyCode.F13, false, game)
-                    task.wait(0.05)
-                    VIM:SendKeyEvent(false, Enum.KeyCode.F13, false, game)
-                end
-            end)
-        end
-    end)
-end)
-
-task.spawn(function()
-    while true do
-        task.wait(60)
-        if CFG.AntiAFK then
-            pcall(function()
-                if VirtualUser then
-                    VirtualUser:CaptureController()
-                    VirtualUser:ClickButton2(Vector2.new(0, 0))
-                else
-                    VIM:SendKeyEvent(true, Enum.KeyCode.F13, false, game)
-                    task.wait(0.05)
-                    VIM:SendKeyEvent(false, Enum.KeyCode.F13, false, game)
-                end
-            end)
-        end
-    end
-end)
-
--- Auto Reconnect Listener
-local _reconnectConn = nil
-pcall(function()
-    _reconnectConn = GuiService.ErrorMessageChanged:Connect(function()
-        if not CFG.AutoReconnect then return end
-        local errMsg = ""
-        pcall(function() errMsg = GuiService:GetErrorMessage() end)
-        print("[CHEAT HUB] ตรวจพบการตัดการเชื่อมต่อ:", errMsg)
-
-        if CFG.WebhookEnabled and CFG.WebhookUrl ~= "" then
-            local payload = {
-                username = "CHEAT HUB v24",
-                avatar_url = "https://i.imgur.com/4M34hi2.png",
-                embeds = {
-                    {
-                        title = "⚠️ Player Disconnected / Auto Reconnecting",
-                        description = "ตรวจพบการหลุดออกจากเซิร์ฟเวอร์ กำลังทำการเชื่อมต่อใหม่ให้อัตโนมัติ...",
-                        color = 0xEF4444,
-                        fields = {
-                            { name = "👤 Player", value = LP.Name, inline = true },
-                            { name = "❌ Reason", value = errMsg ~= "" and errMsg or "Unknown Disconnect", inline = false }
-                        },
-                        footer = { text = "CHEAT HUB v24 · Smart AFK" },
-                        timestamp = DateTime.now():ToIsoDate()
-                    }
-                }
-            }
-            task.spawn(sendDiscordWebhook, CFG.WebhookUrl, payload)
-        end
-
-        local delaySec = math.max(2, tonumber(CFG.ReconnectDelay) or 5)
-        task.wait(delaySec)
-        reconnectCurrentServer()
-    end)
-end)
-
-pcall(function()
-    local CoreGui = game:GetService("CoreGui")
-    local robloxPrompt = CoreGui:WaitForChild("RobloxPromptGui", 5)
-    local promptOverlay = robloxPrompt and robloxPrompt:WaitForChild("promptOverlay", 5)
-    if promptOverlay then
-        promptOverlay.ChildAdded:Connect(function(child)
-            if not CFG.AutoReconnect then return end
-            if child.Name == "ErrorPrompt" then
-                print("[CHEAT HUB] ตรวจพบ ErrorPrompt overlay กำลังรีจอยน์...")
-                local delaySec = math.max(2, tonumber(CFG.ReconnectDelay) or 5)
-                task.wait(delaySec)
-                reconnectCurrentServer()
-            end
+task.spawn(function() while true do task.wait(60)
+    if CFG.AntiAFK then
+        pcall(function()
+            VIM:SendKeyEvent(true,Enum.KeyCode.F13,false,game)
+            task.wait(0.05)
+            VIM:SendKeyEvent(false,Enum.KeyCode.F13,false,game)
         end)
     end
-end)
+end end)
 
 -- ── Boost FPS Optimizer ───────────────────────────────────────────────────────
 local Lighting = game:GetService("Lighting")
@@ -2410,9 +2263,6 @@ weatherUIElements = { icon = wIcon, status = wStatus, sub = wSub }
 task.spawn(updateWeatherUI)
 
 makeCfgToggle(pages["Roll"],"WeatherNotifyScreen","Weather Screen Notification","แสดงข้อความแจ้งเตือนกลางหน้าจอเกมเมื่อเกิดสภาพอากาศพิเศษ")
-makeButton(pages["Roll"],"Hop for Luck Weather","ค้นหาและย้ายไปเล่นเซิร์ฟเวอร์อื่นเพื่อตามล่าสภาพอากาศ Luck Event","Hop Server",function()
-    serverHop()
-end)
 
 local luckDropCard=Instance.new("Frame",pages["Roll"])
 luckDropCard.Size=UDim2.new(1,0,0,96); luckDropCard.BackgroundColor3=DARK.item; luckDropCard.BorderSizePixel=0
@@ -2889,22 +2739,7 @@ end)
 -- ── Utility tab ───────────────────────────────────────────────────────────────
 local function setupUtilityTab()
 
-makeCfgToggle(pages["Utility"],"AntiAFK","Smart Anti-AFK","ป้องกันการถูกเตะจากการอยู่เฉยเกิน 20 นาที (ระบบ VirtualUser + Idled signal)")
-makeCfgToggle(pages["Utility"],"AutoReconnect","Auto Reconnect on Disconnect","เชื่อมต่อเซิร์ฟเวอร์เดิมให้อัตโนมัติเมื่อหลุด หรือมี Error Code เด้ง")
-
-makeSelector(pages["Utility"],"Reconnect Delay","ระยะเวลารอก่อนเชื่อมต่อใหม่หลังหลุด", {
-    { text = "3 Seconds (Fast)", value = 3 },
-    { text = "5 Seconds (Recommended)", value = 5 },
-    { text = "10 Seconds (Safe)", value = 10 }
-}, 2, function(v) CFG.ReconnectDelay = v end)
-
-makeButton(pages["Utility"],"Rejoin Server","เชื่อมต่อเข้าห้องเดิมใหม่ทันที (เหมาะสำหรับแก้บัคเกม)", "Rejoin", function()
-    reconnectCurrentServer()
-end)
-
-makeButton(pages["Utility"],"Server Hop","ค้นหาและย้ายไปเล่นเซิร์ฟเวอร์อื่นที่มีคนเล่นอยู่", "Hop Now", function()
-    serverHop()
-end)
+makeCfgToggle(pages["Utility"],"AntiAFK","Anti-AFK","ป้องกันการถูกเตะจากการอยู่เฉยเกิน 20 นาที (กดปุ่ม F13 ทุก 60 วินาที)")
 
 makeCfgToggle(pages["Utility"],"SuperRAMSaver","AFK Super Saver (1+2+3)","กดทีเดียว: ปิด 3D จอขาว + ล้างขยะ RAM ทุก 60s + ปิดเสียง", function(v) toggleSuperRAMSaver(v) end)
 makeCfgToggle(pages["Utility"],"HideGameUI","Hide Game UI (4)","ซ่อน UI เกมทั้งหมด (ยกเว้น Cheat Hub) ลดภาระ CPU/RAM", function(v) toggleHideGameUI(v) end)
