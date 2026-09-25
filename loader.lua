@@ -23,6 +23,8 @@ local TowerCtrl         = require(RS.Framework.Features.Towers.TowerController)
 local UIReferences      = require(RS.Framework.Features.UI.UIReferences)
 local HUDController     = require(RS.Framework.Features.UI.HUDController)
 local UnitUtil          = nil; pcall(function() UnitUtil = require(RS.Framework.Features.Inventory.Kinds.Unit.UnitUtil) end)
+local UnitController    = nil; pcall(function() UnitController = require(RS.Framework.Features.Inventory.Kinds.Unit.UnitController) end)
+local EntryRegistry     = nil; pcall(function() EntryRegistry = require(RS.Framework.Features.Inventory.EntryRegistry) end)
 local PlotConfig        = nil; pcall(function() PlotConfig = require(RS.Framework.Features.Plot.PlotConfig) end)
 local PlotController    = nil; pcall(function() PlotController = require(RS.Framework.Features.Plot.PlotController) end)
 
@@ -56,6 +58,7 @@ end
 local CollectBalance = RE("PlotService",     "CollectBalance")
 local EquipBest      = RE("PlotService",     "EquipBest")
 local LevelUpSlot    = RE("PlotService",     "LevelUpSlot")
+local InteractSlot   = RE("PlotService",     "InteractSlot")
 local RebirthSignal  = RE("RebirthService",  "Rebirth")
 local QuestSignal    = RE("QuestService",    "Claim")
 local BuyDice        = RE("DiceShopService", "BuyDice")
@@ -211,6 +214,7 @@ local PLOT_UPGRADE_LOOP = 0.3
 local CFG = {
     AutoCollect      = false,
     AutoEquip        = false,
+    AutoEquipMode    = "Rarity",
     AutoRoll         = false,
     FastAutoRoll     = false,
     RollDelay        = 0.1,
@@ -326,6 +330,160 @@ local function autoDice()
             pcall(function() EquipDice:FireServer(bestOwned.name) end)
         end
     end
+end
+
+local _isEquippingRarity = false
+
+local function getUnitRarity(unit)
+    if not unit or not unit.name then return 0 end
+    if not EntryRegistry then
+        pcall(function() EntryRegistry = require(RS.Framework.Features.Inventory.EntryRegistry) end)
+    end
+    if not EntryRegistry or not EntryRegistry.getEntryConfig then return 0 end
+    local cfg = nil
+    pcall(function() cfg = EntryRegistry.getEntryConfig(unit.name) end)
+    if not cfg or cfg.kind ~= "Unit" then return 0 end
+    if cfg.chance then
+        local ok, ch = pcall(cfg.chance, unit.attributes or {})
+        if ok and typeof(ch) == "number" then
+            return ch
+        end
+    end
+    return 0
+end
+
+local function getUnitIncome(unit)
+    if not unit or not unit.name then return 0 end
+    if not EntryRegistry then
+        pcall(function() EntryRegistry = require(RS.Framework.Features.Inventory.EntryRegistry) end)
+    end
+    if not EntryRegistry or not EntryRegistry.getEntryConfig then return 0 end
+    local cfg = nil
+    pcall(function() cfg = EntryRegistry.getEntryConfig(unit.name) end)
+    if not cfg or cfg.kind ~= "Unit" or not cfg.income then return 0 end
+    local ok, inc = pcall(cfg.income, unit.attributes or {})
+    if ok and typeof(inc) == "number" then
+        return inc
+    end
+    return 0
+end
+
+local function equipBestByRarity(notify)
+    if _isEquippingRarity then return end
+    _isEquippingRarity = true
+
+    task.spawn(function()
+        local ok, err = pcall(function()
+            local DC = getDC()
+            if not DC or not DC.Inventory or not DC.Slots then return end
+            local inv = DC.Inventory()
+            if not inv then return end
+
+            local reb = getRebirthLevel()
+            local unlocked = {}
+            for s = 1, SLOT_COUNT do
+                local req = 0
+                if PlotConfig and PlotConfig.GetSlotRebirthRequirement then
+                    pcall(function() req = PlotConfig.GetSlotRebirthRequirement(s) or 0 end)
+                end
+                if reb >= req then
+                    table.insert(unlocked, s)
+                end
+            end
+            if #unlocked == 0 then return end
+
+            local allUnits = {}
+            for key, item in pairs(inv) do
+                if item and item.name and (item.amount or 1) > 0 then
+                    local r = getUnitRarity(item)
+                    local inc = getUnitIncome(item)
+                    table.insert(allUnits, {
+                        key = key,
+                        name = item.name,
+                        rarity = r,
+                        income = inc
+                    })
+                end
+            end
+
+            table.sort(allUnits, function(a, b)
+                if a.rarity == b.rarity then
+                    return a.income > b.income
+                end
+                return a.rarity > b.rarity
+            end)
+
+            local topUnits = {}
+            local topKeys = {}
+            for i = 1, math.min(#unlocked, #allUnits) do
+                table.insert(topUnits, allUnits[i])
+                topKeys[allUnits[i].key] = true
+            end
+
+            local curSlots = {}
+            local curKeys = {}
+            for _, s in ipairs(unlocked) do
+                local sData = nil
+                pcall(function() sData = DC.Slots[tostring(s)]() end)
+                if sData and sData.unitId then
+                    curSlots[s] = sData.unitId
+                    curKeys[sData.unitId] = true
+                end
+            end
+
+            local needed = {}
+            for _, u in ipairs(topUnits) do
+                if not curKeys[u.key] then
+                    table.insert(needed, u)
+                end
+            end
+
+            if #needed == 0 then
+                if notify then showNotif("ยูนิตที่หายากที่สุดถูกสวมใส่ใน Plot ครบแล้ว ✓") end
+                return
+            end
+
+            if notify then
+                showNotif("กำลังจัดยูนิตตามความหายาก (1 in X) " .. #needed .. " ตัว...")
+            end
+
+            local targetSlots = {}
+            for _, s in ipairs(unlocked) do
+                local curKey = curSlots[s]
+                if not curKey or not topKeys[curKey] then
+                    table.insert(targetSlots, s)
+                end
+            end
+
+            if not UnitController then
+                pcall(function() UnitController = require(RS.Framework.Features.Inventory.Kinds.Unit.UnitController) end)
+            end
+
+            for i = 1, math.min(#needed, #targetSlots) do
+                local u = needed[i]
+                local s = targetSlots[i]
+
+                if UnitController and UnitController.Equip then
+                    pcall(UnitController.Equip, u.key)
+                end
+                task.wait(0.55)
+
+                if InteractSlot then
+                    pcall(function() InteractSlot:FireServer(s) end)
+                end
+                task.wait(0.55)
+            end
+
+            if UnitController and UnitController.Unequip then
+                pcall(UnitController.Unequip)
+            end
+
+            if notify then
+                showNotif("จัดวางยูนิตหายากที่สุด (1 in X) สำเร็จเรียบร้อย ✓")
+            end
+        end)
+        _isEquippingRarity = false
+    end)
 end
 
 local function getSlotUpgradeInfo(s)
@@ -809,7 +967,13 @@ task.spawn(function() while true do task.wait(COLLECT_LOOP)
     if CFG.AutoCollect then collectAll() end
 end end)
 task.spawn(function() while true do task.wait(EQUIP_LOOP)
-    if CFG.AutoEquip then pcall(function() EquipBest:FireServer() end) end
+    if CFG.AutoEquip then
+        if CFG.AutoEquipMode == "Rarity" then
+            equipBestByRarity(false)
+        else
+            pcall(function() EquipBest:FireServer() end)
+        end
+    end
 end end)
 task.spawn(function()
     while true do
@@ -1341,7 +1505,7 @@ local function makeSelector(parent,label,sublabel,options,defaultIdx,cb)
     return c, setVal
 end
 
-local plotLvlBox, setPlotMode, setRollDelay
+local plotLvlBox, setPlotMode, setRollDelay, setEquipMode
 local dropMenu, dropBtn, refreshTowerOpts, updateDropBtnText
 local skillDropMenu, skillDropBtn, refreshSkillOpts, updateSkillDropBtnText
 local luckDropMenu, luckDropBtn, refreshLuckOpts, updateLuckDropBtnText
@@ -1361,7 +1525,20 @@ local _, spm = makeSelector(pages["Main"],"Upgrade Mode","อัปเกรด�
     { text = "Focus (One by One)", value = "Single", sub = "อัปเกรดทีละตัวใน Plot ให้ถึงเป้าหมายก่อน" },
 }, 1, function(val) CFG.PlotUpgradeMode=val end)
 setPlotMode = spm
-makeCfgToggle(pages["Main"],"AutoEquip","Auto Equip Best","เลือกสวมใส่ยูนิตที่ทำรายได้สูงสุดอัตโนมัติ")
+makeCfgToggle(pages["Main"],"AutoEquip","Auto Equip Best","สวมใส่ยูนิตที่ดีที่สุดลง Plot อัตโนมัติ")
+local _, sem = makeSelector(pages["Main"],"Equip Priority","เลือกเกณฑ์ในการคัดเลือกยูนิตที่ดีที่สุด",{
+    { text = "Rarity (1 in X)", value = "Rarity", sub = "เรียงจากตัวที่หายากที่สุดก่อน (เช่น 1 in 10qi > 7qi > 5qi)" },
+    { text = "Income ($/s)",    value = "Income", sub = "เรียงจากตัวที่ทำเงินได้สูงสุดต่อวินาที (ตามระบบเกมเดิม)" },
+}, CFG.AutoEquipMode == "Income" and 2 or 1, function(val) CFG.AutoEquipMode = val end)
+setEquipMode = sem
+makeButton(pages["Main"],"Equip Best Now","กดเพื่อจัดยูนิตลง Plot ทันทีตามเกณฑ์ที่เลือก","Equip",function()
+    if CFG.AutoEquipMode == "Rarity" then
+        equipBestByRarity(true)
+    else
+        pcall(function() EquipBest:FireServer() end)
+        showNotif("สวมใส่ยูนิตที่ทำเงินสูงสุดเรียบร้อย ✓")
+    end
+end)
 end
 setupMainTab()
 
@@ -2009,6 +2186,7 @@ local function setupMiscTab()
         if plotLvlBox and CFG.PlotTargetLvl then plotLvlBox.Text = tostring(CFG.PlotTargetLvl) end
         if setPlotMode and CFG.PlotUpgradeMode then setPlotMode(CFG.PlotUpgradeMode) end
         if setRollDelay and CFG.RollDelay then setRollDelay(CFG.RollDelay) end
+        if setEquipMode and CFG.AutoEquipMode then setEquipMode(CFG.AutoEquipMode) end
         for _, ref in ipairs(refreshSkillOpts) do pcall(ref) end
         if updateSkillDropBtnText then pcall(updateSkillDropBtnText) end
         for _, ref in ipairs(refreshTowerOpts) do pcall(ref) end
