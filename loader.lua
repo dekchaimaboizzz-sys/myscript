@@ -1050,7 +1050,7 @@ Instance.new("UICorner",logoBg).CornerRadius=UDim.new(0,8)
 Instance.new("UIStroke",logoBg).Color=DARK.hAccent
 local hIcon=Instance.new("ImageLabel",logoBg)
 hIcon.Size=UDim2.new(0,26,0,26); hIcon.Position=UDim2.new(0.5,-13,0.5,-13)
-hIcon.BackgroundTransparency=1; hIcon.Image="rbxassetid://86571453491468"; hIcon.ScaleType=Enum.ScaleType.Fit
+hIcon.BackgroundTransparency=1; hIcon.Image="rbxthumb://type=Asset&id=86571453491468&w=420&h=420"; hIcon.ScaleType=Enum.ScaleType.Fit
 
 local hT=Instance.new("TextLabel",header)
 hT.Size=UDim2.new(0,200,0,18); hT.Position=UDim2.new(0,58,0,10)
@@ -2381,15 +2381,48 @@ end
 
 do
 minimizedLogo=Instance.new("TextButton",gui)
-minimizedLogo.Size=UDim2.new(0,50,0,50); minimizedLogo.Position=UDim2.new(0.5,-25,0.5,-25)
+minimizedLogo.Size=UDim2.new(0,50,0,50); minimizedLogo.Position=UDim2.new(0,25,0.5,-25)
 minimizedLogo.BackgroundColor3=DARK.bg; minimizedLogo.BackgroundTransparency=0.2
 minimizedLogo.BorderSizePixel=0; minimizedLogo.Text=""; minimizedLogo.Visible=false
+minimizedLogo.Active=true
 Instance.new("UICorner",minimizedLogo).CornerRadius=UDim.new(0,10)
 local mls=Instance.new("UIStroke",minimizedLogo); mls.Color=DARK.accent; mls.Thickness=1.5; mls.Transparency=0.3
 local mlI=Instance.new("ImageLabel",minimizedLogo)
 mlI.Size=UDim2.new(0,36,0,36); mlI.Position=UDim2.new(0.5,-18,0.5,-18)
-mlI.BackgroundTransparency=1; mlI.Image="rbxassetid://86571453491468"; mlI.ScaleType=Enum.ScaleType.Fit
-minimizedLogo.MouseButton1Click:Connect(function() minimizedLogo.Visible=false; main.Visible=true end)
+mlI.BackgroundTransparency=1; mlI.Image="rbxthumb://type=Asset&id=86571453491468&w=420&h=420"; mlI.ScaleType=Enum.ScaleType.Fit
+
+local mDragging, mDragStart, mStartPos, mMoved = false, nil, nil, false
+minimizedLogo.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+        mDragging=true
+        mMoved=false
+        mDragStart=i.Position
+        mStartPos=minimizedLogo.Position
+    end
+end)
+
+UIS.InputChanged:Connect(function(i)
+    if mDragging and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+        local d=i.Position-mDragStart
+        if math.abs(d.X)>3 or math.abs(d.Y)>3 then
+            mMoved=true
+        end
+        minimizedLogo.Position=UDim2.new(mStartPos.X.Scale, mStartPos.X.Offset+d.X, mStartPos.Y.Scale, mStartPos.Y.Offset+d.Y)
+    end
+end)
+
+UIS.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+        mDragging=false
+    end
+end)
+
+minimizedLogo.MouseButton1Click:Connect(function()
+    if not mMoved then
+        minimizedLogo.Visible=false
+        main.Visible=true
+    end
+end)
 
 local wm=Instance.new("TextLabel",gui)
 wm.Size=UDim2.new(0,320,0,30); wm.Position=UDim2.new(1,-340,1,-50)
