@@ -682,6 +682,28 @@ pcall(function()
     end
 end)
 
+local function getTowerActiveState()
+    local guvs = getupvalues or (debug and debug.getupvalues)
+    if guvs and TowerCtrl and TowerCtrl.startTower then
+        local ok, uvs = pcall(guvs, TowerCtrl.startTower)
+        if ok and type(uvs) == "table" then
+            for _, v in pairs(uvs) do
+                if type(v) == "boolean" then
+                    return v
+                end
+            end
+        end
+    end
+    local guv = getupvalue or (debug and debug.getupvalue)
+    if guv and TowerCtrl and TowerCtrl.startTower then
+        local ok, val = pcall(guv, TowerCtrl.startTower, 1)
+        if ok and type(val) == "boolean" then
+            return val
+        end
+    end
+    return nil
+end
+
 local function runSingleTower(towerName, curIndex, totalCount, loopCount)
     if not CFG.AutoTowerQueue then return false end
 
@@ -700,22 +722,41 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
 
     local loopStr = CFG.LoopTower and string.format("Loop #%d · ", loopCount) or ""
 
+    if getTowerActiveState() == true then
+        print(string.format("[TOWER] ตรวจพบหอคอยกำลังทำงานอยู่ รอให้รอบก่อนหน้าจบก่อน..."))
+        setBanner(string.format("⚔️ [%d/%d] %s", curIndex, totalCount, towerName), loopStr .. "มีหอคอยทำงานอยู่ กำลังรอให้จบ...")
+        local waitDeadline = tick() + 900
+        while CFG.AutoTowerQueue and getTowerActiveState() == true and tick() < waitDeadline do
+            task.wait(1.0)
+        end
+        task.wait(4.0)
+    end
+
     setBanner(string.format("⚔️ [%d/%d] %s", curIndex, totalCount, towerName), loopStr .. "กำลังรอเริ่มหอคอย...")
 
     local started = false
-    for attempt = 1, 5 do
+    for attempt = 1, 8 do
         if not CFG.AutoTowerQueue then return false end
         local ok, res = pcall(function() return TowerCtrl.startTower(towerName) end)
-        if ok and res then
+        if (ok and res) or (getTowerActiveState() == true) then
             started = true
             break
         end
-        print(string.format("[TOWER] รอความพร้อมเซิร์ฟเวอร์สำหรับ %s (ครั้งที่ %d/5)...", towerName, attempt))
-        task.wait(2.0)
+        print(string.format("[TOWER] รอความพร้อมเซิร์ฟเวอร์สำหรับ %s (ครั้งที่ %d/8)...", towerName, attempt))
+        task.wait(2.5)
     end
 
     if not started then
-        print("[TOWER] ไม่สามารถเริ่มได้หลังจากพยายาม 5 ครั้ง:", towerName)
+        pcall(function() CancelTower:InvokeServer() end)
+        task.wait(3.5)
+        local okRescue, resRescue = pcall(function() return TowerCtrl.startTower(towerName) end)
+        if (okRescue and resRescue) or (getTowerActiveState() == true) then
+            started = true
+        end
+    end
+
+    if not started then
+        print("[TOWER] ไม่สามารถเริ่มได้หลังจากพยายามหลายครั้ง:", towerName)
         showNotif("⚠️ เริ่ม " .. towerName .. " ไม่สำเร็จ (ข้ามไปยังหอคอยถัดไป)")
         task.wait(2.0)
         return false
@@ -725,7 +766,7 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
     setBanner(nil, loopStr .. "Floor 1 · กำลังต่อสู้...")
 
     task.spawn(function()
-        for _ = 1, 15 do
+        for _ = 1, 20 do
             if HiddenBtn and HiddenBtn.Visible then
                 if firesignal then
                     pcall(firesignal, HiddenBtn.Activated)
@@ -744,15 +785,20 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
         end)
     end)
 
-    task.wait(3.0)
+    task.wait(2.5)
 
-    local deadline = tick() + 900
+    local deadline = tick() + 1800
     local finishConfirmCount = 0
+    local lastSeenFloor = nil
+    local lastFloorTime = tick()
+    local everActive = false
 
     while CFG.AutoTowerQueue and tick() < deadline do
-        local isVis = false
-        if HiddenBtn and HiddenBtn.Visible then isVis = true end
-        if TowerScreen and TowerScreen.Visible then isVis = true end
+        local ctrlState = getTowerActiveState()
+        if ctrlState == true then
+            everActive = true
+            finishConfirmCount = 0
+        end
 
         local currentFloor = nil
         if TowerScreen and TowerScreen:FindFirstChild("Floor") and TowerScreen.Floor:IsA("TextLabel") then
@@ -763,7 +809,12 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
         end
 
         if currentFloor then
-            setBanner(nil, string.format("%sFloor %s · กำลังต่อสู้...", loopStr, currentFloor))
+            if currentFloor ~= lastSeenFloor then
+                lastSeenFloor = currentFloor
+                lastFloorTime = tick()
+                finishConfirmCount = 0
+                setBanner(nil, string.format("%sFloor %s · กำลังต่อสู้...", loopStr, currentFloor))
+            end
         end
 
         local rewardsOpen = false
@@ -782,16 +833,30 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
             break
         end
 
-        if not isVis then
-            finishConfirmCount = finishConfirmCount + 1
-            if finishConfirmCount >= 2 then
-                break
+        if ctrlState == false and everActive then
+            break
+        elseif ctrlState == nil then
+            local isUiActive = false
+            if HiddenBtn and HiddenBtn.Visible and HiddenBtn:FindFirstChild("Label") and HiddenBtn.Label.Text:match("Floor") then
+                isUiActive = true
             end
-        else
-            finishConfirmCount = 0
+            if TowerScreen and TowerScreen.Visible then
+                isUiActive = true
+            end
+
+            if isUiActive then
+                finishConfirmCount = 0
+            else
+                if tick() - lastFloorTime >= 8 then
+                    finishConfirmCount = finishConfirmCount + 1
+                    if finishConfirmCount >= 5 then
+                        break
+                    end
+                end
+            end
         end
 
-        task.wait(0.8)
+        task.wait(1.0)
     end
 
     if not CFG.AutoTowerQueue then
@@ -811,7 +876,7 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
     print("[TOWER] จบการลง:", towerName)
     setBanner(nil, loopStr .. "จบการลงแล้ว กำลังเตรียมตัวรอบถัดไป...")
 
-    task.wait(3.5)
+    task.wait(4.0)
     return true
 end
 
