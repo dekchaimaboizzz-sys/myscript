@@ -27,6 +27,9 @@ local UnitController    = nil; pcall(function() UnitController = require(RS.Fram
 local EntryRegistry     = nil; pcall(function() EntryRegistry = require(RS.Framework.Features.Inventory.EntryRegistry) end)
 local PlotConfig        = nil; pcall(function() PlotConfig = require(RS.Framework.Features.Plot.PlotConfig) end)
 local PlotController    = nil; pcall(function() PlotController = require(RS.Framework.Features.Plot.PlotController) end)
+local showNotif = function(text)
+    print("[CHEAT HUB] " .. tostring(text))
+end
 
 local TowerScreen, TowerBg, HiddenBtn = nil, nil, nil
 pcall(function()
@@ -59,6 +62,8 @@ local CollectBalance = RE("PlotService",     "CollectBalance")
 local EquipBest      = RE("PlotService",     "EquipBest")
 local LevelUpSlot    = RE("PlotService",     "LevelUpSlot")
 local InteractSlot   = RE("PlotService",     "InteractSlot")
+local EquipUnitRF    = nil; pcall(function() EquipUnitRF = RF("UnitService", "Equip") end)
+local UnequipUnitRF  = nil; pcall(function() UnequipUnitRF = RF("UnitService", "Unequip") end)
 local RebirthSignal  = RE("RebirthService",  "Rebirth")
 local QuestSignal    = RE("QuestService",    "Claim")
 local BuyDice        = RE("DiceShopService", "BuyDice")
@@ -345,8 +350,14 @@ local function getUnitRarity(unit)
     if not cfg or cfg.kind ~= "Unit" then return 0 end
     if cfg.chance then
         local ok, ch = pcall(cfg.chance, unit.attributes or {})
-        if ok and typeof(ch) == "number" then
+        if ok and typeof(ch) == "number" and ch > 0 then
             return ch
+        end
+    end
+    if cfg.income then
+        local ok, inc = pcall(cfg.income, unit.attributes or {})
+        if ok and typeof(inc) == "number" and inc > 0 then
+            return inc ^ 1.3793103448275863
         end
     end
     return 0
@@ -369,15 +380,29 @@ local function getUnitIncome(unit)
 end
 
 local function equipBestByRarity(notify)
-    if _isEquippingRarity then return end
+    if _isEquippingRarity then
+        if notify then showNotif("กำลังจัดยูนิตอยู่ กรุณารอสักครู่...") end
+        return
+    end
     _isEquippingRarity = true
 
     task.spawn(function()
         local ok, err = pcall(function()
             local DC = getDC()
-            if not DC or not DC.Inventory or not DC.Slots then return end
-            local inv = DC.Inventory()
-            if not inv then return end
+            if not DC then
+                if notify then showNotif("ไม่สามารถโหลด DataController ได้") end
+                return
+            end
+            if not DC.Inventory or not DC.Slots then
+                if notify then showNotif("ไม่พบข้อมูล Inventory หรือ Slots") end
+                return
+            end
+            local inv = nil
+            pcall(function() inv = DC.Inventory() end)
+            if not inv or type(inv) ~= "table" then
+                if notify then showNotif("กระเป๋าว่างเปล่า หรือยังโหลดไม่เสร็จ") end
+                return
+            end
 
             local reb = getRebirthLevel()
             local unlocked = {}
@@ -390,7 +415,10 @@ local function equipBestByRarity(notify)
                     table.insert(unlocked, s)
                 end
             end
-            if #unlocked == 0 then return end
+            if #unlocked == 0 then
+                if notify then showNotif("ไม่พบ Slot ที่ปลดล็อก") end
+                return
+            end
 
             local allUnits = {}
             for key, item in pairs(inv) do
@@ -406,6 +434,11 @@ local function equipBestByRarity(notify)
                 end
             end
 
+            if #allUnits == 0 then
+                if notify then showNotif("ไม่พบยูนิตในกระเป๋า") end
+                return
+            end
+
             table.sort(allUnits, function(a, b)
                 if a.rarity == b.rarity then
                     return a.income > b.income
@@ -413,9 +446,10 @@ local function equipBestByRarity(notify)
                 return a.rarity > b.rarity
             end)
 
+            local maxEquip = math.min(#unlocked, #allUnits)
             local topUnits = {}
             local topKeys = {}
-            for i = 1, math.min(#unlocked, #allUnits) do
+            for i = 1, maxEquip do
                 table.insert(topUnits, allUnits[i])
                 topKeys[allUnits[i].key] = true
             end
@@ -463,7 +497,12 @@ local function equipBestByRarity(notify)
                 local u = needed[i]
                 local s = targetSlots[i]
 
-                if UnitController and UnitController.Equip then
+                local equipped = false
+                if EquipUnitRF then
+                    local success, res = pcall(function() return EquipUnitRF:InvokeServer(u.key) end)
+                    if success and res ~= false then equipped = true end
+                end
+                if not equipped and UnitController and UnitController.Equip then
                     pcall(UnitController.Equip, u.key)
                 end
                 task.wait(0.55)
@@ -474,7 +513,9 @@ local function equipBestByRarity(notify)
                 task.wait(0.55)
             end
 
-            if UnitController and UnitController.Unequip then
+            if UnequipUnitRF then
+                pcall(function() UnequipUnitRF:InvokeServer() end)
+            elseif UnitController and UnitController.Unequip then
                 pcall(UnitController.Unequip)
             end
 
@@ -482,6 +523,11 @@ local function equipBestByRarity(notify)
                 showNotif("จัดวางยูนิตหายากที่สุด (1 in X) สำเร็จเรียบร้อย ✓")
             end
         end)
+
+        if not ok then
+            warn("[EquipRarity Error]", err)
+            if notify then showNotif("เกิดข้อผิดพลาด: " .. tostring(err)) end
+        end
         _isEquippingRarity = false
     end)
 end
@@ -576,21 +622,33 @@ end
 -- ── Tower Logic ───────────────────────────────────────────────────────────────
 local tBannerTitle, tBannerSub, towerRunBtn
 local isTowerBusy = false
-local showNotif = nil
+
+local function setBanner(title, sub)
+    task.spawn(function()
+        pcall(function()
+            if title and tBannerTitle then tBannerTitle.Text = tostring(title) end
+            if sub and tBannerSub then tBannerSub.Text = tostring(sub) end
+        end)
+    end)
+end
 
 local function updateRunBtnText()
-    if not towerRunBtn then return end
-    if isTowerBusy then
-        towerRunBtn.BackgroundColor3 = DARK.red
-        towerRunBtn.Text = "⏹ Cancel Tower Queue"
-    else
-        towerRunBtn.BackgroundColor3 = DARK.purple
-        if CFG.LoopTower then
-            towerRunBtn.Text = "▶ Start Selected Towers (Loop Mode)"
-        else
-            towerRunBtn.Text = "▶ Start Selected Towers (1 Run Each)"
-        end
-    end
+    task.spawn(function()
+        pcall(function()
+            if not towerRunBtn then return end
+            if isTowerBusy then
+                towerRunBtn.BackgroundColor3 = DARK.red
+                towerRunBtn.Text = "⏹ Cancel Tower Queue"
+            else
+                towerRunBtn.BackgroundColor3 = DARK.purple
+                if CFG.LoopTower then
+                    towerRunBtn.Text = "▶ Start Selected Towers (Loop Mode)"
+                else
+                    towerRunBtn.Text = "▶ Start Selected Towers (1 Run Each)"
+                end
+            end
+        end)
+    end)
 end
 
 pcall(function()
@@ -625,35 +683,54 @@ pcall(function()
 end)
 
 local function runSingleTower(towerName, curIndex, totalCount, loopCount)
+    if not CFG.AutoTowerQueue then return false end
+
     if CFG.EquipTeamBefore then
         pcall(function() EquipBestTeam:FireServer() end)
-        task.wait(0.5)
+        task.wait(1.0)
     end
 
-    TowerScreen.Visible = false
-    TowerBg.Visible = false
+    pcall(function()
+        local MenuController = require(RS.Framework.Features.UI.MenuController)
+        if MenuController and MenuController.CloseMenu then MenuController.CloseMenu() end
+    end)
 
-    local ok, started = pcall(function() return TowerCtrl.startTower(towerName) end)
-    if not ok or not started then
-        print("[TOWER] ไม่สามารถเริ่มได้:", towerName)
-        task.wait(2)
-        return false
-    end
+    if TowerScreen then TowerScreen.Visible = false end
+    if TowerBg then TowerBg.Visible = false end
 
     local loopStr = CFG.LoopTower and string.format("Loop #%d · ", loopCount) or ""
 
-    if tBannerTitle and tBannerSub then
-        tBannerTitle.Text = string.format("⚔️ [%d/%d] %s", curIndex, totalCount, towerName)
-        tBannerSub.Text   = loopStr .. "Floor 1 · กำลังต่อสู้..."
+    setBanner(string.format("⚔️ [%d/%d] %s", curIndex, totalCount, towerName), loopStr .. "กำลังรอเริ่มหอคอย...")
+
+    local started = false
+    for attempt = 1, 5 do
+        if not CFG.AutoTowerQueue then return false end
+        local ok, res = pcall(function() return TowerCtrl.startTower(towerName) end)
+        if ok and res then
+            started = true
+            break
+        end
+        print(string.format("[TOWER] รอความพร้อมเซิร์ฟเวอร์สำหรับ %s (ครั้งที่ %d/5)...", towerName, attempt))
+        task.wait(2.0)
     end
 
+    if not started then
+        print("[TOWER] ไม่สามารถเริ่มได้หลังจากพยายาม 5 ครั้ง:", towerName)
+        showNotif("⚠️ เริ่ม " .. towerName .. " ไม่สำเร็จ (ข้ามไปยังหอคอยถัดไป)")
+        task.wait(2.0)
+        return false
+    end
+
+    print("[TOWER] เริ่มหอคอยสำเร็จ:", towerName)
+    setBanner(nil, loopStr .. "Floor 1 · กำลังต่อสู้...")
+
     task.spawn(function()
-        for _ = 1, 10 do
-            if HiddenBtn.Visible then
+        for _ = 1, 15 do
+            if HiddenBtn and HiddenBtn.Visible then
                 if firesignal then
-                    firesignal(HiddenBtn.Activated)
-                else
-                    HiddenBtn:Activate()
+                    pcall(firesignal, HiddenBtn.Activated)
+                elseif HiddenBtn.Activate then
+                    pcall(function() HiddenBtn:Activate() end)
                 end
                 break
             end
@@ -661,43 +738,80 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
         end
         pcall(function()
             HUDController.showAll("inTower")
-            TowerScreen.Visible = false
-            TowerBg.Visible = false
-            HiddenBtn.Position = UDim2.new(0, -9999, 0, -9999)
+            if TowerScreen then TowerScreen.Visible = false end
+            if TowerBg then TowerBg.Visible = false end
+            if HiddenBtn then HiddenBtn.Position = UDim2.new(0, -9999, 0, -9999) end
         end)
     end)
 
+    task.wait(3.0)
+
     local deadline = tick() + 900
-    task.wait(1.5)
-    
+    local finishConfirmCount = 0
+
     while CFG.AutoTowerQueue and tick() < deadline do
-        local txt = HiddenBtn.Label.Text
-        local isStillPlaying = (txt ~= "Hide") or (txt:match("Floor"))
-        
-        if not isStillPlaying then
-            task.wait(0.8)
-            txt = HiddenBtn.Label.Text
-            if (txt == "Hide") and not (txt:match("Floor")) then
-                break
-            end
+        local isVis = false
+        if HiddenBtn and HiddenBtn.Visible then isVis = true end
+        if TowerScreen and TowerScreen.Visible then isVis = true end
+
+        local currentFloor = nil
+        if TowerScreen and TowerScreen:FindFirstChild("Floor") and TowerScreen.Floor:IsA("TextLabel") then
+            currentFloor = TowerScreen.Floor.Text:match("Floor (%d+)")
+        end
+        if not currentFloor and HiddenBtn and HiddenBtn:FindFirstChild("Label") and HiddenBtn.Label:IsA("TextLabel") then
+            currentFloor = HiddenBtn.Label.Text:match("Floor (%d+)")
         end
 
-        local floorNum = txt:match("Floor (%d+)")
-        if not floorNum and TowerScreen:FindFirstChild("Floor") then
-            floorNum = TowerScreen.Floor.Text:match("Floor (%d+)")
+        if currentFloor then
+            setBanner(nil, string.format("%sFloor %s · กำลังต่อสู้...", loopStr, currentFloor))
         end
-        if floorNum and tBannerSub then
-            tBannerSub.Text = string.format("%sFloor %s · กำลังต่อสู้...", loopStr, floorNum)
+
+        local rewardsOpen = false
+        pcall(function()
+            local tr = UIReferences and UIReferences.Menus and UIReferences.Menus.TowerRewards
+            if tr and tr.Visible then rewardsOpen = true end
+        end)
+
+        if rewardsOpen then
+            task.spawn(function()
+                pcall(function()
+                    local MenuController = require(RS.Framework.Features.UI.MenuController)
+                    if MenuController and MenuController.CloseMenu then MenuController.CloseMenu() end
+                end)
+            end)
+            break
         end
-        task.wait(0.5)
+
+        if not isVis then
+            finishConfirmCount = finishConfirmCount + 1
+            if finishConfirmCount >= 2 then
+                break
+            end
+        else
+            finishConfirmCount = 0
+        end
+
+        task.wait(0.8)
     end
 
     if not CFG.AutoTowerQueue then
         pcall(function() CancelTower:InvokeServer() end)
     end
 
-    print("[TOWER] จบ:", towerName)
-    task.wait(2)
+    task.spawn(function()
+        pcall(function()
+            local MenuController = require(RS.Framework.Features.UI.MenuController)
+            if MenuController and MenuController.CloseMenu then MenuController.CloseMenu() end
+        end)
+        pcall(function()
+            HUDController.showAll("inTower")
+        end)
+    end)
+
+    print("[TOWER] จบการลง:", towerName)
+    setBanner(nil, loopStr .. "จบการลงแล้ว กำลังเตรียมตัวรอบถัดไป...")
+
+    task.wait(3.5)
     return true
 end
 
@@ -713,8 +827,7 @@ local function startTowerQueue()
 
     if #queue == 0 then
         CFG.AutoTowerQueue = false
-        if tBannerTitle then tBannerTitle.Text = "⚠️ No Towers Selected" end
-        if tBannerSub then tBannerSub.Text = "กรุณากดปุ่ม Select Towers เพื่อเลือกหอคอยก่อนเริ่ม" end
+        setBanner("⚠️ No Towers Selected", "กรุณากดปุ่ม Select Towers เพื่อเลือกหอคอยก่อนเริ่ม")
         return
     end
 
@@ -722,12 +835,7 @@ local function startTowerQueue()
     isTowerBusy = true
     updateRunBtnText()
 
-    if tBannerTitle then
-        tBannerTitle.Text = string.format("⚔️ [1/%d] Preparing...", #queue)
-    end
-    if tBannerSub then
-        tBannerSub.Text = "กำลังเข้าสู่หอคอย..."
-    end
+    setBanner(string.format("⚔️ [1/%d] Preparing...", #queue), "กำลังเข้าสู่หอคอย...")
 
     _towerQueueThread = task.spawn(function()
         local loopCount = 1
@@ -748,8 +856,7 @@ local function startTowerQueue()
         isTowerBusy = false
         updateRunBtnText()
 
-        if tBannerTitle then tBannerTitle.Text = "✅ Completed All Rounds" end
-        if tBannerSub then tBannerSub.Text = "ลงเสร็จสิ้นทุกรอบแล้ว พร้อมเริ่มใหม่" end
+        setBanner("✅ Completed All Rounds", "ลงเสร็จสิ้นทุกรอบแล้ว พร้อมเริ่มใหม่")
     end)
 end
 
@@ -763,8 +870,7 @@ local function stopTowerQueue()
     isTowerBusy = false
     updateRunBtnText()
 
-    if tBannerTitle then tBannerTitle.Text = "⏹ Queue Cancelled" end
-    if tBannerSub then tBannerSub.Text = "หยุดการทำงานแล้ว พร้อมเริ่มรอบใหม่" end
+    setBanner("⏹ Queue Cancelled", "หยุดการทำงานแล้ว พร้อมเริ่มรอบใหม่")
 end
 
 -- ── Luck Potions Logic ────────────────────────────────────────────────────────
@@ -1170,11 +1276,19 @@ Instance.new("UICorner",notif).CornerRadius=UDim.new(0,8)
 Instance.new("UIStroke",notif).Color=DARK.accent
 
 showNotif = function(text)
-    notif.Text="  > "..text; notif.Visible=true
-    TweenService:Create(notif,TweenInfo.new(0.3),{Position=UDim2.new(0.5,-150,0,20)}):Play()
-    task.delay(1.5,function()
-        TweenService:Create(notif,TweenInfo.new(0.3),{Position=UDim2.new(0.5,-150,0,-40)}):Play()
-        task.wait(0.4); notif.Visible=false end)
+    print("[CHEAT HUB] " .. tostring(text))
+    pcall(function()
+        if notif then
+            notif.Text = "  > " .. tostring(text)
+            notif.Visible = true
+            TweenService:Create(notif, TweenInfo.new(0.3), { Position = UDim2.new(0.5, -150, 0, 20) }):Play()
+            task.delay(1.5, function()
+                TweenService:Create(notif, TweenInfo.new(0.3), { Position = UDim2.new(0.5, -150, 0, -40) }):Play()
+                task.wait(0.4)
+                notif.Visible = false
+            end)
+        end
+    end)
 end
 
 main=Instance.new("Frame")
@@ -1532,6 +1646,7 @@ local _, sem = makeSelector(pages["Main"],"Equip Priority","เลือกเ�
 }, CFG.AutoEquipMode == "Income" and 2 or 1, function(val) CFG.AutoEquipMode = val end)
 setEquipMode = sem
 makeButton(pages["Main"],"Equip Best Now","กดเพื่อจัดยูนิตลง Plot ทันทีตามเกณฑ์ที่เลือก","Equip",function()
+    print("[CHEAT HUB] Clicked Equip Best Now (Mode: " .. tostring(CFG.AutoEquipMode) .. ")")
     if CFG.AutoEquipMode == "Rarity" then
         equipBestByRarity(true)
     else
