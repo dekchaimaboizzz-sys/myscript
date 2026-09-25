@@ -1,13 +1,16 @@
 -- 540CHEATS v24 GUI | Cheat Hub (Loop Towers Mode Added)
 
-local Players      = game:GetService("Players")
-local RunService   = game:GetService("RunService")
-local UIS          = game:GetService("UserInputService")
-local VIM          = game:GetService("VirtualInputManager")
-local TweenService = game:GetService("TweenService")
-local HttpService  = game:GetService("HttpService")
-local LP           = Players.LocalPlayer
-local RS           = game:GetService("ReplicatedStorage")
+local Players         = game:GetService("Players")
+local RunService      = game:GetService("RunService")
+local UIS             = game:GetService("UserInputService")
+local VIM             = game:GetService("VirtualInputManager")
+local TweenService    = game:GetService("TweenService")
+local HttpService     = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local GuiService      = game:GetService("GuiService")
+local VirtualUser     = nil; pcall(function() VirtualUser = game:GetService("VirtualUser") end)
+local LP              = Players.LocalPlayer
+local RS              = game:GetService("ReplicatedStorage")
 
 local function waitForLoad()
     if not game:IsLoaded() then game.Loaded:Wait() end
@@ -80,6 +83,31 @@ if not UseBoost then
         local bComm = ClientComm.new(RS.Network, false, "BoostService")
         UseBoost = bComm:GetSignal("Use")
     end)
+end
+
+local RewardSignals = {
+    DailyClaim = nil,
+    GroupClaim = nil,
+    OfflineClaim = nil
+}
+pcall(function()
+    local ClientComm = require(RS.Packages.Network).ClientComm
+    RewardSignals.DailyClaim = ClientComm.new(RS.Network, false, "DailyRewardService"):GetSignal("Claim")
+    RewardSignals.GroupClaim = ClientComm.new(RS.Network, false, "GroupRewardService"):GetSignal("Claim")
+    RewardSignals.OfflineClaim = ClientComm.new(RS.Network, false, "OfflineEarningsService"):GetSignal("Claim")
+end)
+if not RewardSignals.DailyClaim then pcall(function() RewardSignals.DailyClaim = RE("DailyRewardService", "Claim") end) end
+if not RewardSignals.GroupClaim then pcall(function() RewardSignals.GroupClaim = RE("GroupRewardService", "Claim") end) end
+if not RewardSignals.OfflineClaim then pcall(function() RewardSignals.OfflineClaim = RE("OfflineEarningsService", "Claim") end) end
+
+local function fireCommSignal(sig, ...)
+    if not sig then return false end
+    if type(sig.Fire) == "function" then
+        return pcall(function(...) sig:Fire(...) end, ...)
+    elseif type(sig.FireServer) == "function" then
+        return pcall(function(...) sig:FireServer(...) end, ...)
+    end
+    return false
 end
 
 print("[HUB] Remotes OK")
@@ -224,24 +252,36 @@ local CFG = {
     FastAutoRoll     = false,
     RollDelay        = 0.1,
     SkipCutscene     = true,
-    AutoRebirth      = false,
-    AntiAFK          = false,
-    AutoQuest        = false,
-    AutoBuyDice      = false,
-    AutoEquipDice    = false,
-    AutoUpgrade      = false,
-    AutoTowerQueue   = false,
-    LoopTower        = false,
-    EquipTeamBefore  = true,
-    AutoUpgradePlot  = false,
-    PlotTargetLvl    = 50,
-    PlotUpgradeMode  = "Equal",
-    BoostFPS         = false,
-    Disable3DRender  = false,
-    SuperRAMSaver    = false,
-    HideGameUI       = false,
-    AutoUseLuck      = false,
-    AutoLuckOnEvent  = false,
+    AutoRebirth            = false,
+    AntiAFK                = true,
+    AutoReconnect          = true,
+    ReconnectDelay         = 5,
+    AutoClaimRewards       = false,
+    AutoQuest              = false,
+    AutoBuyDice            = false,
+    AutoEquipDice          = false,
+    AutoUpgrade            = false,
+    AutoTowerQueue         = false,
+    LoopTower              = false,
+    EquipTeamBefore        = true,
+    AutoUpgradePlot        = false,
+    PlotTargetLvl          = 50,
+    PlotUpgradeMode        = "Equal",
+    BoostFPS               = false,
+    Disable3DRender        = false,
+    SuperRAMSaver          = false,
+    HideGameUI             = false,
+    AutoUseLuck            = false,
+    AutoLuckOnEvent        = false,
+    WeatherNotifyScreen    = true,
+    WeatherNotifyWebhook   = true,
+    WebhookUrl             = "",
+    WebhookEnabled         = false,
+    WebhookNotifyRareUnit  = true,
+    WebhookMinRarity       = 100000,
+    WebhookNotifyTower     = true,
+    WebhookNotifyStats     = false,
+    WebhookStatsInterval   = 15,
 }
 
 local FONT = Enum.Font.RobotoMono
@@ -278,6 +318,274 @@ local function getRebirthLevel()
     local DC=getDC(); if DC and DC.Rebirth then return tonumber(DC.Rebirth()) or 0 end; return 0
 end
 
+-- ── Discord Webhook System ───────────────────────────────────────────────────
+local function getHttpRequestFunc()
+    if syn and type(syn.request) == "function" then return syn.request end
+    if http and type(http.request) == "function" then return http.request end
+    if type(http_request) == "function" then return http_request end
+    if type(request) == "function" then return request end
+    return nil
+end
+
+local function sendDiscordWebhook(url, payload)
+    if not url or url == "" then return false, "Webhook URL is empty" end
+    if not url:find("discord%.com/api/webhooks") and not url:find("discordapp%.com/api/webhooks") then
+        return false, "Invalid Discord Webhook URL"
+    end
+    local req = getHttpRequestFunc()
+    if not req then return false, "Executor does not support HTTP requests" end
+
+    local okEnc, body = pcall(function() return HttpService:JSONEncode(payload) end)
+    if not okEnc or not body then return false, "Failed to encode JSON payload" end
+
+    local ok, res = pcall(function()
+        return req({
+            Url = url,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = body
+        })
+    end)
+
+    if ok and res then
+        local code = res.StatusCode or res.status_code
+        if code and (code >= 200 and code < 300 or code == 204) then
+            return true, "Success"
+        else
+            return false, "HTTP Error " .. tostring(code)
+        end
+    end
+    return false, tostring(res)
+end
+
+local function formatNumberCompact(n)
+    if not n or type(n) ~= "number" then return tostring(n or 0) end
+    if n >= 1e18 then return string.format("%.2fQi", n / 1e18)
+    elseif n >= 1e15 then return string.format("%.2fQa", n / 1e15)
+    elseif n >= 1e12 then return string.format("%.2fT", n / 1e12)
+    elseif n >= 1e9 then return string.format("%.2fB", n / 1e9)
+    elseif n >= 1e6 then return string.format("%.2fM", n / 1e6)
+    elseif n >= 1e3 then return string.format("%.2fK", n / 1e3)
+    else return tostring(math.floor(n)) end
+end
+
+local function sendTestWebhook()
+    local url = CFG.WebhookUrl
+    if not url or url == "" then
+        showNotif("⚠️ กรุณาใส่ Webhook URL ก่อนกดทดสอบ")
+        return false
+    end
+    local payload = {
+        username = "CHEAT HUB v24",
+        avatar_url = "https://i.imgur.com/4M34hi2.png",
+        embeds = {
+            {
+                title = "🔔 Discord Webhook Test",
+                description = "การเชื่อมต่อ Discord Webhook สำเร็จเรียบร้อย พร้อมรับการแจ้งเตือนจาก CHEAT HUB v24 แล้ว!",
+                color = 0x8A2BE2,
+                fields = {
+                    { name = "👤 Player", value = LP.Name .. " (" .. LP.DisplayName .. ")", inline = true },
+                    { name = "🆔 User ID", value = tostring(LP.UserId), inline = true },
+                    { name = "⚡ Status", value = "Connected & Active ✓", inline = true }
+                },
+                footer = { text = "CHEAT HUB v24 · Automated System" },
+                timestamp = DateTime.now():ToIsoDate()
+            }
+        }
+    }
+    local ok, msg = sendDiscordWebhook(url, payload)
+    if ok then
+        showNotif("✅ ส่งข้อความทดสอบเข้า Discord สำเร็จแล้ว!")
+        return true
+    else
+        showNotif("❌ ส่งไม่สำเร็จ: " .. tostring(msg))
+        return false
+    end
+end
+
+local function sendRareUnitWebhook(unitName, mutation, chance)
+    if not CFG.WebhookEnabled or not CFG.WebhookNotifyRareUnit then return end
+    local url = CFG.WebhookUrl
+    if not url or url == "" then return end
+
+    local mutationStr = mutation and (" (" .. tostring(mutation) .. ")") or ""
+    local chanceStr = "1 in " .. formatNumberCompact(chance)
+
+    local payload = {
+        username = "CHEAT HUB v24",
+        avatar_url = "https://i.imgur.com/4M34hi2.png",
+        embeds = {
+            {
+                title = "🔥 Rare Unit Rolled!",
+                description = string.format("ยินดีด้วย! คุณเพิ่งทอยได้ยูนิตหายาก **%s%s**!", unitName, mutationStr),
+                color = 0xF59E0B,
+                fields = {
+                    { name = "👤 Player", value = LP.Name .. " (" .. LP.DisplayName .. ")", inline = true },
+                    { name = "🎲 Unit", value = "**" .. unitName .. "**" .. mutationStr, inline = true },
+                    { name = "✨ Rarity", value = "**" .. chanceStr .. "**", inline = true },
+                    { name = "💰 Money", value = "$" .. formatNumberCompact(getMoney()), inline = true },
+                    { name = "🔄 Rebirth", value = "Tier " .. tostring(getRebirthLevel()), inline = true }
+                },
+                footer = { text = "CHEAT HUB v24 · Rare Alert" },
+                timestamp = DateTime.now():ToIsoDate()
+            }
+        }
+    }
+    task.spawn(sendDiscordWebhook, url, payload)
+end
+
+local function sendTowerWebhook(towerName, floor, loopCount)
+    if not CFG.WebhookEnabled or not CFG.WebhookNotifyTower then return end
+    local url = CFG.WebhookUrl
+    if not url or url == "" then return end
+
+    local loopStr = loopCount and string.format("Round #%d", loopCount) or "1 Round"
+    local payload = {
+        username = "CHEAT HUB v24",
+        avatar_url = "https://i.imgur.com/4M34hi2.png",
+        embeds = {
+            {
+                title = "🏰 Tower Completed!",
+                description = string.format("การลงหอคอย **%s** จบลงเรียบร้อยแล้ว!", towerName),
+                color = 0x8B5CF6,
+                fields = {
+                    { name = "👤 Player", value = LP.Name .. " (" .. LP.DisplayName .. ")", inline = true },
+                    { name = "🏰 Tower Name", value = towerName, inline = true },
+                    { name = "🏆 Highest Floor", value = "Floor " .. tostring(floor), inline = true },
+                    { name = "🔁 Tower Loop", value = loopStr, inline = true },
+                    { name = "💰 Current Money", value = "$" .. formatNumberCompact(getMoney()), inline = true },
+                    { name = "🔄 Rebirth", value = "Tier " .. tostring(getRebirthLevel()), inline = true }
+                },
+                footer = { text = "CHEAT HUB v24 · Tower Report" },
+                timestamp = DateTime.now():ToIsoDate()
+            }
+        }
+    }
+    task.spawn(sendDiscordWebhook, url, payload)
+end
+
+local function sendWeatherWebhook(eventName, multiplierText, duration)
+    if not CFG.WebhookEnabled or not CFG.WeatherNotifyWebhook then return end
+    local url = CFG.WebhookUrl
+    if not url or url == "" then return end
+
+    local color = 0x10B981
+    if eventName:find("Cash") then
+        color = 0xF59E0B
+    elseif eventName:find("Speed") then
+        color = 0x06B6D4
+    end
+
+    local payload = {
+        username = "CHEAT HUB v24",
+        avatar_url = "https://i.imgur.com/4M34hi2.png",
+        embeds = {
+            {
+                title = "🌦️ [WEATHER EVENT] ตรวจพบสภาพอากาศพิเศษ!",
+                description = string.format("สภาพอากาศพิเศษ **%s** กำลังทำงานในเซิร์ฟเวอร์!", eventName),
+                color = color,
+                fields = {
+                    { name = "👤 ผู้เล่น", value = LP.Name .. " (" .. LP.DisplayName .. ")", inline = true },
+                    { name = "⚡ สภาพอากาศ", value = "**" .. eventName .. "**", inline = true },
+                    { name = "📊 บัฟที่ได้รับ", value = multiplierText or "โชค/เงินพิเศษ", inline = true },
+                    { name = "⏳ ระยะเวลา", value = tostring(duration or 0) .. " วินาที", inline = true },
+                    { name = "🌐 Job ID", value = string.format("`%s`", tostring(game.JobId)), inline = false }
+                },
+                footer = { text = "CHEAT HUB v24 · Weather Tracker" },
+                timestamp = DateTime.now():ToIsoDate()
+            }
+        }
+    }
+    task.spawn(sendDiscordWebhook, url, payload)
+end
+
+local function sendRewardWebhook(rewardName, rewardDetail)
+    if not CFG.WebhookEnabled then return end
+    local url = CFG.WebhookUrl
+    if not url or url == "" then return end
+
+    local payload = {
+        username = "CHEAT HUB v24",
+        avatar_url = "https://i.imgur.com/4M34hi2.png",
+        embeds = {
+            {
+                title = "🎁 [REWARDS] รับของรางวัลฟรีสำเร็จ!",
+                description = string.format("ผู้เล่น **%s** ได้รับของรางวัลฟรี: **%s**", LP.Name, rewardName),
+                color = 0x3B82F6,
+                fields = {
+                    { name = "🎁 ประเภทรางวัล", value = rewardName, inline = true },
+                    { name = "📋 รายละเอียด", value = rewardDetail or "สำเร็จ", inline = true },
+                    { name = "💰 เงินปัจจุบัน", value = "$" .. formatNumberCompact(getMoney()), inline = true }
+                },
+                footer = { text = "CHEAT HUB v24 · Auto Rewards" },
+                timestamp = DateTime.now():ToIsoDate()
+            }
+        }
+    }
+    task.spawn(sendDiscordWebhook, url, payload)
+end
+
+local function sendStatsWebhook()
+    if not CFG.WebhookEnabled or not CFG.WebhookNotifyStats then return end
+    local url = CFG.WebhookUrl
+    if not url or url == "" then return end
+
+    local DC = getDC()
+    local diceName = "Default"
+    if DC and DC.Dice then
+        pcall(function() diceName = tostring(DC.Dice()) end)
+    end
+
+    local payload = {
+        username = "CHEAT HUB v24",
+        avatar_url = "https://i.imgur.com/4M34hi2.png",
+        embeds = {
+            {
+                title = "📊 AFK Farm Stats Summary",
+                description = "รายงานสถานะความคืบหน้าการฟาร์มปัจจุบันของคุณ",
+                color = 0x3B82F6,
+                fields = {
+                    { name = "👤 Player", value = LP.Name .. " (" .. LP.DisplayName .. ")", inline = true },
+                    { name = "💰 Money", value = "$" .. formatNumberCompact(getMoney()), inline = true },
+                    { name = "🔄 Rebirth", value = "Tier " .. tostring(getRebirthLevel()), inline = true },
+                    { name = "🎲 Current Dice", value = diceName, inline = true }
+                },
+                footer = { text = "CHEAT HUB v24 · Periodic Report" },
+                timestamp = DateTime.now():ToIsoDate()
+            }
+        }
+    }
+    task.spawn(sendDiscordWebhook, url, payload)
+end
+
+local function checkRollWebhook(res)
+    if not CFG.WebhookEnabled or not CFG.WebhookNotifyRareUnit then return end
+    if not res or type(res) ~= "table" then return end
+    for _, item in ipairs(res) do
+        if type(item) == "table" and item.result then
+            local unitName = item.result
+            local mutation = item.mutation
+            local chance = 0
+            if EntryRegistry and EntryRegistry.getEntryConfig then
+                local ok, cfg = pcall(function() return EntryRegistry.getEntryConfig(unitName) end)
+                if ok and cfg and cfg.chance then
+                    pcall(function() chance = cfg.chance({ mutation = mutation }) end)
+                end
+            end
+            if chance == 0 then
+                chance = getUnitRarity({ name = unitName, attributes = { mutation = mutation } })
+            end
+
+            local minChance = CFG.WebhookMinRarity or 100000
+            if chance >= minChance then
+                sendRareUnitWebhook(unitName, mutation, chance)
+            end
+        end
+    end
+end
+
 -- ── Cheat functions ───────────────────────────────────────────────────────────
 local function collectAll()
     for s=1,SLOT_COUNT do
@@ -301,6 +609,72 @@ local function claimAllQuests()
                 task.wait(0.25)
             end
         end
+    end
+end
+
+local function claimDailyReward(manual)
+    local DC = getDC(); if not DC then return false end
+    local lastClaim = 0
+    pcall(function() lastClaim = DC.LastDailyRewardClaim and DC.LastDailyRewardClaim() or 0 end)
+    local isReady = (lastClaim == 0) or (os.time() - lastClaim >= 82800)
+    if isReady then
+        fireCommSignal(RewardSignals.DailyClaim)
+        local claimedIdx = 1
+        pcall(function() claimedIdx = (DC.DailyRewardsClaimed and DC.DailyRewardsClaimed() or 0) + 1 end)
+        showNotif("🎁 รับรางวัลรายวัน (Day " .. tostring(claimedIdx) .. ") เรียบร้อย ✓")
+        print("[REWARDS] Claimed Daily Reward Day " .. tostring(claimedIdx))
+        pcall(sendRewardWebhook, "Daily Reward (Day " .. tostring(claimedIdx) .. ")", "รับรางวัลล็อกอินประจำวันสำเร็จ")
+        return true
+    elseif manual then
+        local waitSec = math.max(0, 82800 - (os.time() - lastClaim))
+        local h = math.floor(waitSec / 3600)
+        local m = math.floor((waitSec % 3600) / 60)
+        showNotif(string.format("⏳ รางวัลรายวันยังไม่พร้อม (รออีก %d ชม. %d นาที)", h, m))
+    end
+    return false
+end
+
+local function claimGroupReward(manual)
+    local DC = getDC(); if not DC then return false end
+    local alreadyClaimed = false
+    pcall(function() alreadyClaimed = DC.ClaimedGroupReward and DC.ClaimedGroupReward() end)
+    if not alreadyClaimed then
+        fireCommSignal(RewardSignals.GroupClaim)
+        showNotif("👥 รับของรางวัลกลุ่ม (Group Chest) เรียบร้อย ✓")
+        print("[REWARDS] Claimed Group Chest Reward")
+        pcall(sendRewardWebhook, "Group Chest", "รับของรางวัลกล่องกลุ่มเรียบร้อย")
+        return true
+    elseif manual then
+        showNotif("ℹ️ รับของรางวัลกลุ่มไปแล้ว")
+    end
+    return false
+end
+
+local function claimOfflineEarnings(manual)
+    local DC = getDC(); if not DC then return false end
+    local pending = 0
+    pcall(function() pending = DC.PendingOfflineEarnings and DC.PendingOfflineEarnings() or 0 end)
+    if pending and pending > 0 then
+        fireCommSignal(RewardSignals.OfflineClaim)
+        local formatted = formatNumberCompact(pending)
+        showNotif("💰 รับเงินออฟไลน์ $" .. formatted .. " เรียบร้อย ✓")
+        print("[REWARDS] Claimed Offline Earnings: $" .. tostring(pending))
+        pcall(sendRewardWebhook, "Offline Earnings", "รับเงินสะสมออฟไลน์ $" .. formatted)
+        return true
+    elseif manual then
+        showNotif("ℹ️ ไม่มีเงินออฟไลน์คงค้างในขณะนี้")
+    end
+    return false
+end
+
+local function claimAllFreeRewards(manual)
+    local anyClaimed = false
+    if claimDailyReward(manual) then anyClaimed = true task.wait(0.3) end
+    if claimGroupReward(manual) then anyClaimed = true task.wait(0.3) end
+    if claimOfflineEarnings(manual) then anyClaimed = true task.wait(0.3) end
+    if CFG.AutoQuest then claimAllQuests() end
+    if manual and not anyClaimed then
+        showNotif("✓ ตรวจสอบแล้ว: ไม่มีรางวัลฟรีที่ค้างรับในขณะนี้")
     end
 end
 
@@ -885,6 +1259,9 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
 
     print("[TOWER] จบการลง:", towerName)
     setBanner(nil, loopStr .. "จบการลงแล้ว กำลังเตรียมตัวรอบถัดไป...")
+    if CFG.WebhookEnabled and CFG.WebhookNotifyTower then
+        task.spawn(sendTowerWebhook, towerName, lastSeenFloor or 1, loopCount)
+    end
 
     task.wait(4.0)
     return true
@@ -1099,6 +1476,53 @@ end
 -- ── Weather (Server Event) Observer ───────────────────────────────────────────
 local currentServerWeather = nil
 local lastHandledWeatherStart = nil
+local weatherUIElements = nil
+
+local function getWeatherBuffText(wName)
+    if not wName then return "ไม่มีบัฟ" end
+    if wName == "Luck Event" or wName:find("Luck") then
+        return "🍀 +150% Luck (2.5x Multiplier)"
+    elseif wName == "Cash Event" or wName:find("Cash") then
+        return "💰 +150% Money (2.5x Multiplier)"
+    elseif wName == "Roll Speed Event" or wName:find("Speed") then
+        return "⚡ 2x Roll Speed (0.5x Duration)"
+    end
+    return "✨ Special Event Multiplier"
+end
+
+local function updateWeatherUI()
+    if not weatherUIElements then return end
+    pcall(function()
+        if currentServerWeather and currentServerWeather.name then
+            local wName = tostring(currentServerWeather.name)
+            local buff = getWeatherBuffText(wName)
+            local dur = currentServerWeather.duration or 300
+            local started = currentServerWeather.startedAt or os.time()
+            local elapsed = math.max(0, os.time() - started)
+            local remaining = math.max(0, dur - elapsed)
+            local m = math.floor(remaining / 60)
+            local s = remaining % 60
+
+            weatherUIElements.icon.Text = wName:find("Luck") and "🍀" or (wName:find("Cash") and "💰" or "⚡")
+            weatherUIElements.status.Text = string.format("%s (%02d:%02d)", wName, m, s)
+            if wName:find("Luck") then
+                weatherUIElements.status.TextColor3 = Color3.fromRGB(80, 255, 140)
+            elseif wName:find("Cash") then
+                weatherUIElements.status.TextColor3 = Color3.fromRGB(255, 215, 0)
+            else
+                weatherUIElements.status.TextColor3 = Color3.fromRGB(0, 220, 255)
+            end
+            weatherUIElements.sub.Text = string.format("Buff: %s", buff)
+            weatherUIElements.sub.TextColor3 = Color3.fromRGB(220, 220, 240)
+        else
+            weatherUIElements.icon.Text = "☀️"
+            weatherUIElements.status.Text = "Normal Weather (ไม่มีอีเวนต์)"
+            weatherUIElements.status.TextColor3 = DARK.subtext
+            weatherUIElements.sub.Text = "รอสภาพอากาศพิเศษ (Luck 2.5x / Cash 2.5x / Speed 2x)"
+            weatherUIElements.sub.TextColor3 = DARK.subtext
+        end
+    end)
+end
 
 local function checkEventAutoLuck()
     if not CFG.AutoLuckOnEvent then return end
@@ -1129,14 +1553,37 @@ local function setupWeatherListener()
         activeWeatherProp:Observe(function(weatherData)
             currentServerWeather = weatherData
             if weatherData and weatherData.name then
+                local wName = tostring(weatherData.name)
+                local wStart = weatherData.startedAt or 0
+                if lastHandledWeatherStart ~= wStart then
+                    local buff = getWeatherBuffText(wName)
+                    if CFG.WeatherNotifyScreen then
+                        pcall(function()
+                            showNotif("🌦️ [EVENT] " .. wName .. " เริ่มต้นแล้ว! (" .. buff .. ")")
+                        end)
+                    end
+                    if CFG.WeatherNotifyWebhook and CFG.WebhookEnabled then
+                        pcall(sendWeatherWebhook, wName, buff, weatherData.duration or 0)
+                    end
+                end
                 task.spawn(checkEventAutoLuck)
             else
                 lastHandledWeatherStart = nil
             end
+            task.spawn(updateWeatherUI)
         end)
     end)
 end
 task.spawn(setupWeatherListener)
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if currentServerWeather and currentServerWeather.name then
+            pcall(updateWeatherUI)
+        end
+    end
+end)
 
 -- ── Skip Cutscene Hook ────────────────────────────────────────────────────────
 pcall(function()
@@ -1176,7 +1623,19 @@ task.spawn(function()
         end
         task.wait(math.max(0.05, delayTime))
         if CFG.FastAutoRoll or CFG.AutoRoll then
-            pcall(function() RollDice:InvokeServer() end)
+            local ok, res = pcall(function() return RollDice:InvokeServer() end)
+            if ok and res and type(res) == "table" then
+                task.spawn(checkRollWebhook, res)
+            end
+        end
+    end
+end)
+task.spawn(function()
+    while true do
+        local mins = CFG.WebhookStatsInterval or 15
+        task.wait(math.max(1, mins) * 60)
+        if CFG.WebhookEnabled and CFG.WebhookNotifyStats then
+            pcall(sendStatsWebhook)
         end
     end
 end)
@@ -1185,6 +1644,9 @@ task.spawn(function() while true do task.wait(REBIRTH_LOOP)
 end end)
 task.spawn(function() while true do task.wait(QUEST_LOOP)
     if CFG.AutoQuest then claimAllQuests() end
+end end)
+task.spawn(function() while true do task.wait(30)
+    if CFG.AutoClaimRewards then pcall(function() claimAllFreeRewards(false) end) end
 end end)
 task.spawn(function() while true do task.wait(DICE_LOOP)
     if CFG.AutoBuyDice or CFG.AutoEquipDice then autoDice() end
@@ -1198,15 +1660,160 @@ end end)
 task.spawn(function() while true do task.wait(2)
     if CFG.AutoUseLuck then pcall(autoUseLuckPotions) end
 end end)
-task.spawn(function() while true do task.wait(60)
-    if CFG.AntiAFK then
-        pcall(function()
-            VIM:SendKeyEvent(true,Enum.KeyCode.F13,false,game)
-            task.wait(0.05)
-            VIM:SendKeyEvent(false,Enum.KeyCode.F13,false,game)
+-- ── Smart Anti-AFK & Auto Reconnect / Server Hop ────────────────────────────
+local function queueScriptOnTeleport(scriptStr)
+    local qot = queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport)
+    if qot and type(scriptStr) == "string" and scriptStr ~= "" then
+        pcall(qot, scriptStr)
+    end
+end
+
+local function reconnectCurrentServer()
+    showNotif("กำลังเชื่อมต่อเซิร์ฟเวอร์เดิมใหม่...")
+    task.wait(1)
+    local ok = pcall(function()
+        if #Players:GetPlayers() <= 1 then
+            TeleportService:Teleport(game.PlaceId, LP)
+        else
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
+        end
+    end)
+    if not ok then
+        pcall(function() TeleportService:Teleport(game.PlaceId, LP) end)
+    end
+end
+
+local function serverHop()
+    showNotif("กำลังค้นหาเซิร์ฟเวอร์ใหม่ (Server Hop)...")
+    task.spawn(function()
+        local placeId = game.PlaceId
+        local curJob = game.JobId
+        local serversUrl = string.format("https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=Desc&limit=100", tostring(placeId))
+
+        local req = getHttpRequestFunc()
+        local serverList = {}
+
+        if req then
+            local ok, res = pcall(function()
+                return req({ Url = serversUrl, Method = "GET" })
+            end)
+            if ok and res and res.Body then
+                local okDec, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                if okDec and data and data.data then
+                    for _, s in ipairs(data.data) do
+                        if type(s) == "table" and s.id and s.id ~= curJob and s.playing and s.maxPlayers and s.playing < s.maxPlayers then
+                            table.insert(serverList, s.id)
+                        end
+                    end
+                end
+            end
+        end
+
+        if #serverList > 0 then
+            local targetId = serverList[math.random(1, #serverList)]
+            showNotif("พบเซิร์ฟเวอร์ใหม่แล้ว กำลังวาร์ป...")
+            task.wait(0.5)
+            pcall(function()
+                TeleportService:TeleportToPlaceInstance(placeId, targetId, LP)
+            end)
+        else
+            showNotif("ไม่พบเซิร์ฟเวอร์เฉพาะ กำลังวาร์ปสุ่มเซิร์ฟเวอร์...")
+            task.wait(0.5)
+            pcall(function()
+                TeleportService:Teleport(placeId, LP)
+            end)
+        end
+    end)
+end
+
+-- Smart Anti-AFK (VirtualUser + Idled signal + F13 Fallback)
+pcall(function()
+    LP.Idled:Connect(function()
+        if CFG.AntiAFK then
+            pcall(function()
+                if VirtualUser then
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new(0, 0))
+                else
+                    VIM:SendKeyEvent(true, Enum.KeyCode.F13, false, game)
+                    task.wait(0.05)
+                    VIM:SendKeyEvent(false, Enum.KeyCode.F13, false, game)
+                end
+            end)
+        end
+    end)
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(60)
+        if CFG.AntiAFK then
+            pcall(function()
+                if VirtualUser then
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new(0, 0))
+                else
+                    VIM:SendKeyEvent(true, Enum.KeyCode.F13, false, game)
+                    task.wait(0.05)
+                    VIM:SendKeyEvent(false, Enum.KeyCode.F13, false, game)
+                end
+            end)
+        end
+    end
+end)
+
+-- Auto Reconnect Listener
+local _reconnectConn = nil
+pcall(function()
+    _reconnectConn = GuiService.ErrorMessageChanged:Connect(function()
+        if not CFG.AutoReconnect then return end
+        local errMsg = ""
+        pcall(function() errMsg = GuiService:GetErrorMessage() end)
+        print("[CHEAT HUB] ตรวจพบการตัดการเชื่อมต่อ:", errMsg)
+
+        if CFG.WebhookEnabled and CFG.WebhookUrl ~= "" then
+            local payload = {
+                username = "CHEAT HUB v24",
+                avatar_url = "https://i.imgur.com/4M34hi2.png",
+                embeds = {
+                    {
+                        title = "⚠️ Player Disconnected / Auto Reconnecting",
+                        description = "ตรวจพบการหลุดออกจากเซิร์ฟเวอร์ กำลังทำการเชื่อมต่อใหม่ให้อัตโนมัติ...",
+                        color = 0xEF4444,
+                        fields = {
+                            { name = "👤 Player", value = LP.Name, inline = true },
+                            { name = "❌ Reason", value = errMsg ~= "" and errMsg or "Unknown Disconnect", inline = false }
+                        },
+                        footer = { text = "CHEAT HUB v24 · Smart AFK" },
+                        timestamp = DateTime.now():ToIsoDate()
+                    }
+                }
+            }
+            task.spawn(sendDiscordWebhook, CFG.WebhookUrl, payload)
+        end
+
+        local delaySec = math.max(2, tonumber(CFG.ReconnectDelay) or 5)
+        task.wait(delaySec)
+        reconnectCurrentServer()
+    end)
+end)
+
+pcall(function()
+    local CoreGui = game:GetService("CoreGui")
+    local robloxPrompt = CoreGui:WaitForChild("RobloxPromptGui", 5)
+    local promptOverlay = robloxPrompt and robloxPrompt:WaitForChild("promptOverlay", 5)
+    if promptOverlay then
+        promptOverlay.ChildAdded:Connect(function(child)
+            if not CFG.AutoReconnect then return end
+            if child.Name == "ErrorPrompt" then
+                print("[CHEAT HUB] ตรวจพบ ErrorPrompt overlay กำลังรีจอยน์...")
+                local delaySec = math.max(2, tonumber(CFG.ReconnectDelay) or 5)
+                task.wait(delaySec)
+                reconnectCurrentServer()
+            end
         end)
     end
-end end)
+end)
 
 -- ── Boost FPS Optimizer ───────────────────────────────────────────────────────
 local Lighting = game:GetService("Lighting")
@@ -1491,7 +2098,7 @@ local function createTab(name,icon)
 end
 
 createTab("Main","🏠"); createTab("Roll","🎲"); createTab("Skill","⚡")
-createTab("Tower","🏰"); createTab("Utility","⚙️"); createTab("Misc","💾"); createTab("Settings","🛠️")
+createTab("Tower","🏰"); createTab("Webhook","📡"); createTab("Utility","⚙️"); createTab("Misc","💾"); createTab("Settings","🛠️")
 tabs["Main"].BackgroundTransparency=0; tabs["Main"].BackgroundColor3=DARK.item
 pages["Main"].Visible=true
 tabs["Main"]:FindFirstChild("TextLabel").TextColor3=Color3.new(1,1,1)
@@ -1739,6 +2346,10 @@ makeButton(pages["Main"],"Equip Best Now","กดเพื่อจัดยู�
         showNotif("สวมใส่ยูนิตที่ทำเงินสูงสุดเรียบร้อย ✓")
     end
 end)
+makeCfgToggle(pages["Main"],"AutoClaimRewards","Auto Claim Free Rewards","รับของรางวัลฟรีทั้งหมดอัตโนมัติ (Daily Login, Group Chest, และ Offline Cash)")
+makeButton(pages["Main"],"Claim Free Rewards Now","กดรับ Daily Login, Group Chest, และ Offline Cash ทันที 1 ครั้ง","Claim All",function()
+    claimAllFreeRewards(true)
+end)
 end
 setupMainTab()
 
@@ -1763,6 +2374,44 @@ makeCfgToggle(pages["Roll"],"AutoLuckOnEvent","Auto Luck on Luck Event","เม�
     if val then
         task.spawn(checkEventAutoLuck)
     end
+end)
+
+local weatherCard = Instance.new("Frame", pages["Roll"])
+weatherCard.Size = UDim2.new(1, 0, 0, 78)
+weatherCard.BackgroundColor3 = DARK.item; weatherCard.BorderSizePixel = 0
+Instance.new("UICorner", weatherCard).CornerRadius = UDim.new(0, 8)
+local wStroke = Instance.new("UIStroke", weatherCard)
+wStroke.Color = DARK.border; wStroke.Thickness = 1.2
+
+local wIcon = Instance.new("TextLabel", weatherCard)
+wIcon.Size = UDim2.new(0, 32, 0, 32); wIcon.Position = UDim2.new(0, 10, 0, 10)
+wIcon.BackgroundTransparency = 1; wIcon.Text = "🌦️"; wIcon.TextSize = 22
+wIcon.Font = FONT
+
+local wTitle = Instance.new("TextLabel", weatherCard)
+wTitle.Size = UDim2.new(1, -55, 0, 16); wTitle.Position = UDim2.new(0, 48, 0, 8)
+wTitle.BackgroundTransparency = 1; wTitle.Text = "Server Weather & Event Status"
+wTitle.TextColor3 = DARK.text; wTitle.TextXAlignment = Enum.TextXAlignment.Left
+wTitle.Font = FONT; wTitle.TextSize = 11
+
+local wStatus = Instance.new("TextLabel", weatherCard)
+wStatus.Size = UDim2.new(1, -55, 0, 18); wStatus.Position = UDim2.new(0, 48, 0, 26)
+wStatus.BackgroundTransparency = 1; wStatus.Text = "Normal Weather (ไม่มีอีเวนต์)"
+wStatus.TextColor3 = DARK.subtext; wStatus.TextXAlignment = Enum.TextXAlignment.Left
+wStatus.Font = FONT; wStatus.TextSize = 12
+
+local wSub = Instance.new("TextLabel", weatherCard)
+wSub.Size = UDim2.new(1, -55, 0, 14); wSub.Position = UDim2.new(0, 48, 0, 48)
+wSub.BackgroundTransparency = 1; wSub.Text = "รอสภาพอากาศพิเศษ (Luck 2.5x / Cash 2.5x / Speed 2x)"
+wSub.TextColor3 = DARK.subtext; wSub.TextXAlignment = Enum.TextXAlignment.Left
+wSub.Font = FONT; wSub.TextSize = 9
+
+weatherUIElements = { icon = wIcon, status = wStatus, sub = wSub }
+task.spawn(updateWeatherUI)
+
+makeCfgToggle(pages["Roll"],"WeatherNotifyScreen","Weather Screen Notification","แสดงข้อความแจ้งเตือนกลางหน้าจอเกมเมื่อเกิดสภาพอากาศพิเศษ")
+makeButton(pages["Roll"],"Hop for Luck Weather","ค้นหาและย้ายไปเล่นเซิร์ฟเวอร์อื่นเพื่อตามล่าสภาพอากาศ Luck Event","Hop Server",function()
+    serverHop()
 end)
 
 local luckDropCard=Instance.new("Frame",pages["Roll"])
@@ -2240,11 +2889,27 @@ end)
 -- ── Utility tab ───────────────────────────────────────────────────────────────
 local function setupUtilityTab()
 
+makeCfgToggle(pages["Utility"],"AntiAFK","Smart Anti-AFK","ป้องกันการถูกเตะจากการอยู่เฉยเกิน 20 นาที (ระบบ VirtualUser + Idled signal)")
+makeCfgToggle(pages["Utility"],"AutoReconnect","Auto Reconnect on Disconnect","เชื่อมต่อเซิร์ฟเวอร์เดิมให้อัตโนมัติเมื่อหลุด หรือมี Error Code เด้ง")
+
+makeSelector(pages["Utility"],"Reconnect Delay","ระยะเวลารอก่อนเชื่อมต่อใหม่หลังหลุด", {
+    { text = "3 Seconds (Fast)", value = 3 },
+    { text = "5 Seconds (Recommended)", value = 5 },
+    { text = "10 Seconds (Safe)", value = 10 }
+}, 2, function(v) CFG.ReconnectDelay = v end)
+
+makeButton(pages["Utility"],"Rejoin Server","เชื่อมต่อเข้าห้องเดิมใหม่ทันที (เหมาะสำหรับแก้บัคเกม)", "Rejoin", function()
+    reconnectCurrentServer()
+end)
+
+makeButton(pages["Utility"],"Server Hop","ค้นหาและย้ายไปเล่นเซิร์ฟเวอร์อื่นที่มีคนเล่นอยู่", "Hop Now", function()
+    serverHop()
+end)
+
 makeCfgToggle(pages["Utility"],"SuperRAMSaver","AFK Super Saver (1+2+3)","กดทีเดียว: ปิด 3D จอขาว + ล้างขยะ RAM ทุก 60s + ปิดเสียง", function(v) toggleSuperRAMSaver(v) end)
 makeCfgToggle(pages["Utility"],"HideGameUI","Hide Game UI (4)","ซ่อน UI เกมทั้งหมด (ยกเว้น Cheat Hub) ลดภาระ CPU/RAM", function(v) toggleHideGameUI(v) end)
 makeCfgToggle(pages["Utility"],"Disable3DRender","Disable 3D Rendering","ปิดภาพ 3D (จอขาว) ประหยัด CPU & RAM เหมาะกับ AFK", function(v) toggle3DRendering(v) end)
 makeCfgToggle(pages["Utility"],"BoostFPS","Boost FPS","ลดเอฟเฟกต์/กราฟิกและแสงเงา เพิ่มความลื่นไหลและ FPS", function(v) toggleBoostFPS(v) end)
-makeCfgToggle(pages["Utility"],"AntiAFK","Anti AFK","ป้องกันการหลุดจากการอยู่เฉยๆ (กด F13 อัตโนมัติ)")
 makeCfgToggle(pages["Utility"],"AutoQuest","Auto Claim Quests","รับของรางวัลเควสทั้งหมดอัตโนมัติ")
 
 end
@@ -2717,6 +3382,101 @@ local function setupMiscTab()
     end)
 end
 setupMiscTab()
+
+-- ── Webhook tab ─────────────────────────────────────────────────────────────
+local function setupWebhookTab()
+    local banner = Instance.new("Frame", pages["Webhook"])
+    banner.Size = UDim2.new(1, 0, 0, 52)
+    banner.BackgroundColor3 = Color3.fromRGB(28, 20, 48)
+    banner.BorderSizePixel = 0
+    Instance.new("UICorner", banner).CornerRadius = UDim.new(0, 8)
+    local bStroke = Instance.new("UIStroke", banner)
+    bStroke.Color = DARK.purple; bStroke.Thickness = 1.2
+
+    local bIcon = Instance.new("TextLabel", banner)
+    bIcon.Size = UDim2.new(0, 32, 1, 0); bIcon.Position = UDim2.new(0, 10, 0, 0)
+    bIcon.BackgroundTransparency = 1; bIcon.Text = "📡"; bIcon.TextSize = 20
+    bIcon.Font = FONT
+
+    local bTitle = Instance.new("TextLabel", banner)
+    bTitle.Size = UDim2.new(1, -55, 0, 20); bTitle.Position = UDim2.new(0, 45, 0, 8)
+    bTitle.BackgroundTransparency = 1; bTitle.Text = "Discord Webhook Notification"
+    bTitle.TextColor3 = Color3.new(1, 1, 1); bTitle.TextXAlignment = Enum.TextXAlignment.Left
+    bTitle.Font = FONT; bTitle.TextSize = 13
+
+    local bSub = Instance.new("TextLabel", banner)
+    bSub.Size = UDim2.new(1, -55, 0, 16); bSub.Position = UDim2.new(0, 45, 0, 28)
+    bSub.BackgroundTransparency = 1
+    local hasHttp = getHttpRequestFunc() ~= nil
+    bSub.Text = (hasHttp and "HTTP Request Supported ✓" or "⚠️ Executor does not support HTTP")
+    bSub.TextColor3 = (hasHttp and Color3.fromRGB(100, 255, 140) or DARK.red)
+    bSub.TextXAlignment = Enum.TextXAlignment.Left
+    bSub.Font = FONT; bSub.TextSize = 10
+
+    local urlCard = Instance.new("Frame", pages["Webhook"])
+    urlCard.Size = UDim2.new(1, 0, 0, 80)
+    urlCard.BackgroundColor3 = DARK.item
+    urlCard.BorderSizePixel = 0
+    Instance.new("UICorner", urlCard).CornerRadius = UDim.new(0, 8)
+
+    local urlTitle = Instance.new("TextLabel", urlCard)
+    urlTitle.Size = UDim2.new(1, -20, 0, 18); urlTitle.Position = UDim2.new(0, 12, 0, 8)
+    urlTitle.BackgroundTransparency = 1; urlTitle.Text = "Discord Webhook URL"
+    urlTitle.TextColor3 = DARK.text; urlTitle.TextXAlignment = Enum.TextXAlignment.Left
+    urlTitle.Font = FONT; urlTitle.TextSize = 12
+
+    local urlBox = Instance.new("TextBox", urlCard)
+    urlBox.Size = UDim2.new(1, -24, 0, 34); urlBox.Position = UDim2.new(0, 12, 0, 34)
+    urlBox.BackgroundColor3 = Color3.fromRGB(22, 18, 34); urlBox.BorderSizePixel = 0
+    urlBox.Text = tostring(CFG.WebhookUrl or "")
+    urlBox.PlaceholderText = "วางลิงก์ https://discord.com/api/webhooks/... ที่นี่"
+    urlBox.PlaceholderColor3 = DARK.subtext
+    urlBox.TextColor3 = Color3.fromRGB(240, 230, 255)
+    urlBox.Font = FONT; urlBox.TextSize = 11; urlBox.ClearTextOnFocus = false
+    urlBox.TextXAlignment = Enum.TextXAlignment.Left
+    Instance.new("UICorner", urlBox).CornerRadius = UDim.new(0, 6)
+    local ubs = Instance.new("UIStroke", urlBox)
+    ubs.Color = DARK.purple; ubs.Thickness = 1
+    local uPad = Instance.new("UIPadding", urlBox)
+    uPad.PaddingLeft = UDim.new(0, 8); uPad.PaddingRight = UDim.new(0, 8)
+
+    urlBox.FocusLost:Connect(function()
+        CFG.WebhookUrl = urlBox.Text:gsub("%s+", "")
+        showNotif("บันทึก Webhook URL แล้ว")
+    end)
+
+    makeButton(pages["Webhook"], "Test Webhook", "ส่งข้อความทดสอบเพื่อเช็คว่าลิงก์เชื่อมต่อได้ถูกต้อง", "Send Test", function()
+        sendTestWebhook()
+    end)
+
+    makeCfgToggle(pages["Webhook"], "WebhookEnabled", "Enable Webhook", "เปิด/ปิด ระบบแจ้งเตือน Discord ทั้งหมด")
+    makeCfgToggle(pages["Webhook"], "WebhookNotifyRareUnit", "Rare Unit Alert", "แจ้งเตือนเมื่อทอยได้ยูนิตระดับหายาก")
+
+    makeSelector(pages["Webhook"], "Minimum Rarity", "ระดับความหายากขั้นต่ำที่จะให้ส่งแจ้งเตือน", {
+        { text = "1 in 10,000 (Rare+)", value = 10000 },
+        { text = "1 in 100,000 (Epic+)", value = 100000 },
+        { text = "1 in 1,000,000 (Legendary+)", value = 1000000 },
+        { text = "1 in 10,000,000 (Mythic+)", value = 10000000 },
+        { text = "1 in 100,000,000 (Secret+)", value = 100000000 },
+        { text = "1 in 1,000,000,000 (Divine+)", value = 1000000000 }
+    }, 2, function(val)
+        CFG.WebhookMinRarity = val
+    end)
+
+    makeCfgToggle(pages["Webhook"], "WebhookNotifyTower", "Tower Completion Alert", "แจ้งเตือนเมื่อจบการลงหอคอยแต่ละรอบ (พร้อมชั้นสูงสุด)")
+makeCfgToggle(pages["Webhook"], "WeatherNotifyWebhook", "Weather Event Alert", "ส่งแจ้งเตือนเข้า Discord ทันทีเมื่อเกิดสภาพอากาศพิเศษ (Luck / Cash / Speed Event)")
+    makeCfgToggle(pages["Webhook"], "WebhookNotifyStats", "Periodic Stats Report", "ส่งสรุปสถานะการฟาร์ม (เงิน, Rebirth, ยูนิต) ตามเวลา")
+
+    makeSelector(pages["Webhook"], "Report Interval", "ความถี่ในการส่งรายงานสรุปสถิติ", {
+        { text = "Every 10 Minutes", value = 10 },
+        { text = "Every 15 Minutes", value = 15 },
+        { text = "Every 30 Minutes", value = 30 },
+        { text = "Every 60 Minutes", value = 60 }
+    }, 2, function(val)
+        CFG.WebhookStatsInterval = val
+    end)
+end
+setupWebhookTab()
 
 -- ── Settings tab ──────────────────────────────────────────────────────────────
 do
