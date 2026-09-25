@@ -212,6 +212,9 @@ local CFG = {
     AutoCollect      = false,
     AutoEquip        = false,
     AutoRoll         = false,
+    FastAutoRoll     = false,
+    RollDelay        = 0.1,
+    SkipCutscene     = true,
     AutoRebirth      = false,
     AntiAFK          = false,
     AutoQuest        = false,
@@ -786,6 +789,21 @@ local function setupWeatherListener()
 end
 task.spawn(setupWeatherListener)
 
+-- ── Skip Cutscene Hook ────────────────────────────────────────────────────────
+pcall(function()
+    local RollCtrl = require(RS.Framework.Features.Rolling.RollController)
+    if RollCtrl and RollCtrl.PlayCutscene then
+        local origCutscene = RollCtrl.PlayCutscene
+        RollCtrl.PlayCutscene = function(p1, p2, p3)
+            if CFG.SkipCutscene then
+                if p3 then pcall(function() p3:Destroy() end) end
+                return
+            end
+            return origCutscene(p1, p2, p3)
+        end
+    end
+end)
+
 -- ── Background loops ──────────────────────────────────────────────────────────
 task.spawn(function() while true do task.wait(COLLECT_LOOP)
     if CFG.AutoCollect then collectAll() end
@@ -793,9 +811,20 @@ end end)
 task.spawn(function() while true do task.wait(EQUIP_LOOP)
     if CFG.AutoEquip then pcall(function() EquipBest:FireServer() end) end
 end end)
-task.spawn(function() while true do task.wait(ROLL_DELAY)
-    if CFG.AutoRoll then pcall(function() RollDice:InvokeServer() end) end
-end end)
+task.spawn(function()
+    while true do
+        local delayTime = 2.6
+        if CFG.FastAutoRoll then
+            delayTime = CFG.RollDelay or 0.1
+        elseif CFG.AutoRoll then
+            delayTime = CFG.RollDelay or 2.6
+        end
+        task.wait(math.max(0.05, delayTime))
+        if CFG.FastAutoRoll or CFG.AutoRoll then
+            pcall(function() RollDice:InvokeServer() end)
+        end
+    end
+end)
 task.spawn(function() while true do task.wait(REBIRTH_LOOP)
     if CFG.AutoRebirth then tryRebirth() end
 end end)
@@ -1312,7 +1341,7 @@ local function makeSelector(parent,label,sublabel,options,defaultIdx,cb)
     return c, setVal
 end
 
-local plotLvlBox, setPlotMode
+local plotLvlBox, setPlotMode, setRollDelay
 local dropMenu, dropBtn, refreshTowerOpts, updateDropBtnText
 local skillDropMenu, skillDropBtn, refreshSkillOpts, updateSkillDropBtnText
 local luckDropMenu, luckDropBtn, refreshLuckOpts, updateLuckDropBtnText
@@ -1338,7 +1367,17 @@ setupMainTab()
 
 -- ── Roll tab ──────────────────────────────────────────────────────────────────
 local function setupRollTab()
-makeCfgToggle(pages["Roll"],"AutoRoll","Auto Roll","ทอยลูกเต๋าอัตโนมัติทุก 2.6 วินาที")
+makeCfgToggle(pages["Roll"],"FastAutoRoll","Fast Auto Roll","ทอยลูกเต๋าแบบเร็วพิเศษ ยิงคำสั่งรัวตาม Cooldown เซิร์ฟเวอร์")
+local _, srd = makeSelector(pages["Roll"],"Roll Delay","ปรับความเร็วการส่งคำสั่งทอยลูกเต๋า",{
+    { text = "0.1s (Ultra Fast)", value = 0.1, sub = "ยิงรัวทุก 0.1s ทันทีที่เซิร์ฟเวอร์พร้อม (~1.2s-2.5s)" },
+    { text = "0.2s (Fast)",       value = 0.2, sub = "ยิงทุก 0.2s รวดเร็วและลดโหลดส่งข้อมูล" },
+    { text = "0.5s (Medium)",     value = 0.5, sub = "ทอยเร็วปานกลางทุก 0.5s" },
+    { text = "1.0s (Normal)",     value = 1.0, sub = "ทอยทุก 1 วินาที" },
+    { text = "2.6s (Default)",    value = 2.6, sub = "ทอยตามความเร็วพื้นฐานเดิมของเกม" },
+}, 1, function(val) CFG.RollDelay = val end)
+setRollDelay = srd
+makeCfgToggle(pages["Roll"],"SkipCutscene","Skip Roll Cutscene (Fast)","ข้ามฉากคัตซีนแรร์ ไม่ล็อกมุมกล้อง ไม่เสียเวลาคัตซีน")
+makeCfgToggle(pages["Roll"],"AutoRoll","Normal Auto Roll","ทอยลูกเต๋าแบบปกติ (ดีเลย์ 2.6 วินาที)")
 makeCfgToggle(pages["Roll"],"AutoBuyDice","Auto Buy Best Dice","ซื้อลูกเต๋าที่มีค่าโชคสูงสุดอัตโนมัติ")
 makeCfgToggle(pages["Roll"],"AutoEquipDice","Auto Equip Best Dice","สวมใส่ลูกเต๋าที่ดีที่สุดอัตโนมัติ")
 makeCfgToggle(pages["Roll"],"AutoRebirth","Auto Rebirth","รีเบิร์ธอัตโนมัติเมื่อเงินถึงเกณฑ์ที่กำหนด")
@@ -1969,6 +2008,7 @@ local function setupMiscTab()
         end
         if plotLvlBox and CFG.PlotTargetLvl then plotLvlBox.Text = tostring(CFG.PlotTargetLvl) end
         if setPlotMode and CFG.PlotUpgradeMode then setPlotMode(CFG.PlotUpgradeMode) end
+        if setRollDelay and CFG.RollDelay then setRollDelay(CFG.RollDelay) end
         for _, ref in ipairs(refreshSkillOpts) do pcall(ref) end
         if updateSkillDropBtnText then pcall(updateSkillDropBtnText) end
         for _, ref in ipairs(refreshTowerOpts) do pcall(ref) end
