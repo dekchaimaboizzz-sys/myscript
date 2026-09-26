@@ -11,6 +11,7 @@ local GuiService      = game:GetService("GuiService")
 local VirtualUser     = nil; pcall(function() VirtualUser = game:GetService("VirtualUser") end)
 local LP              = Players.LocalPlayer
 local RS              = game:GetService("ReplicatedStorage")
+local CFG = nil
 
 local function waitForLoad()
     if not game:IsLoaded() then game.Loaded:Wait() end
@@ -30,6 +31,8 @@ local UnitController    = nil; pcall(function() UnitController = require(RS.Fram
 local EntryRegistry     = nil; pcall(function() EntryRegistry = require(RS.Framework.Features.Inventory.EntryRegistry) end)
 local PlotConfig        = nil; pcall(function() PlotConfig = require(RS.Framework.Features.Plot.PlotConfig) end)
 local PlotController    = nil; pcall(function() PlotController = require(RS.Framework.Features.Plot.PlotController) end)
+local EntryDropCtrl     = nil; pcall(function() EntryDropCtrl = require(RS.Framework.Features.Notifications.EntryDropController) end)
+local _towerFinishedSignal = 0
 local showNotif = function(text)
     print("[CHEAT HUB] " .. tostring(text))
 end
@@ -45,6 +48,38 @@ pcall(function()
     HUDController.showAll("inTower")
     if TowerScreen then TowerScreen.Visible = false end
     if TowerBg then TowerBg.Visible = false end
+end)
+
+pcall(function()
+    local MenuController = require(RS.Framework.Features.UI.MenuController)
+    if MenuController and MenuController.OpenMenu then
+        local origOpen = MenuController.OpenMenu
+        MenuController.OpenMenu = function(menu)
+            if CFG and CFG.AutoTowerQueue and menu and typeof(menu) == "Instance" and menu.Name == "TowerRewards" then
+                if menu:IsA("GuiObject") then menu.Visible = false end
+                _towerFinishedSignal = tick()
+                pcall(function()
+                    if EntryDropCtrl and menu:FindFirstChild("Content") and menu.Content:FindFirstChild("ScrollingFrame") then
+                        for _, item in ipairs(menu.Content.ScrollingFrame:GetChildren()) do
+                            if item:IsA("GuiObject") and item.Name ~= "UIGridLayout" and item.Name ~= "UIPadding" then
+                                local name = item.Name
+                                local amt = 1
+                                local amtLbl = item:FindFirstChild("Amount", true) or item:FindFirstChild("Count", true) or item:FindFirstChild("TextLabel", true)
+                                if amtLbl and amtLbl.Text then
+                                    amt = tonumber(amtLbl.Text:match("%d+")) or 1
+                                end
+                                task.spawn(function()
+                                    pcall(function() EntryDropCtrl.Play(name, amt) end)
+                                end)
+                            end
+                        end
+                    end
+                end)
+                return
+            end
+            return origOpen(menu)
+        end
+    end
 end)
 
 -- ── Remotes ───────────────────────────────────────────────────────────────────
@@ -244,7 +279,7 @@ local DICE_LOOP    = 5
 local UPGRADE_LOOP = 3
 local PLOT_UPGRADE_LOOP = 0.3
 
-local CFG = {
+CFG = {
     AutoCollect      = false,
     AutoEquip        = false,
     AutoEquipMode    = "Rarity",
@@ -1054,11 +1089,34 @@ pcall(function()
     end
 end)
 
+-- Continuous enforcer: Keep Tower UI hidden & HUD visible during AutoTowerQueue
+pcall(function()
+    RunService.RenderStepped:Connect(function()
+        if CFG.AutoTowerQueue then
+            if TowerScreen and TowerScreen.Visible then TowerScreen.Visible = false end
+            if TowerBg and TowerBg.Visible then TowerBg.Visible = false end
+            if HiddenBtn and HiddenBtn.Position ~= UDim2.new(0, -9999, 0, -9999) then
+                HiddenBtn.Position = UDim2.new(0, -9999, 0, -9999)
+            end
+            local tr = UIReferences and UIReferences.Menus and UIReferences.Menus:FindFirstChild("TowerRewards")
+            if tr and tr.Visible then tr.Visible = false end
+            pcall(function()
+                if HUDController and HUDController.isHidden and HUDController.isHidden(UIReferences.HUD.Bottom) then
+                    HUDController.showAll("inTower")
+                end
+            end)
+        end
+    end)
+end)
+
 local function getTowerActiveState()
     local guvs = getupvalues or (debug and debug.getupvalues)
     if guvs and TowerCtrl and TowerCtrl.startTower then
         local ok, uvs = pcall(guvs, TowerCtrl.startTower)
         if ok and type(uvs) == "table" then
+            if type(uvs[1]) == "boolean" then
+                return uvs[1]
+            end
             for _, v in pairs(uvs) do
                 if type(v) == "boolean" then
                     return v
@@ -1073,6 +1131,20 @@ local function getTowerActiveState()
             return val
         end
     end
+
+    if HiddenBtn and HiddenBtn:FindFirstChild("Label") and HiddenBtn.Label:IsA("TextLabel") then
+        local txt = HiddenBtn.Label.Text
+        if txt == "Hide" and (not TowerScreen or not TowerScreen.Visible) then
+            return false
+        elseif txt:match("Floor%s*%d+") then
+            return true
+        end
+    end
+
+    if TowerScreen and TowerScreen.Visible then
+        return true
+    end
+
     return nil
 end
 
@@ -1102,9 +1174,9 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
     if getTowerActiveState() == true then
         print(string.format("[TOWER] ตรวจพบหอคอยกำลังทำงานอยู่ รอให้รอบก่อนหน้าจบก่อน..."))
         setBanner(string.format("⚔️ [%d/%d] %s", curIndex, totalCount, towerName), loopStr .. "มีหอคอยทำงานอยู่ กำลังรอให้จบ...")
-        local waitDeadline = tick() + 900
+        local waitDeadline = tick() + 1800
         while CFG.AutoTowerQueue and getTowerActiveState() == true and tick() < waitDeadline do
-            task.wait(1.0)
+            task.wait(1.5)
         end
         task.wait(4.0)
     end
@@ -1112,24 +1184,25 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
     setBanner(string.format("⚔️ [%d/%d] %s", curIndex, totalCount, towerName), loopStr .. "กำลังรอเริ่มหอคอย...")
 
     local started = false
-    for attempt = 1, 8 do
+    for attempt = 1, 12 do
         if not CFG.AutoTowerQueue then return false end
+        local su = setupvalue or (debug and debug.setupvalue)
+        local guv = getupvalue or (debug and debug.getupvalue)
+        if guv and su and TowerCtrl and TowerCtrl.startTower then
+            pcall(function()
+                local towerStartedFn = guv(TowerCtrl.startTower, 8)
+                if towerStartedFn then
+                    pcall(su, towerStartedFn, 1, true)
+                end
+            end)
+        end
         local ok, res = pcall(function() return TowerCtrl.startTower(towerName) end)
-        if (ok and res) or (getTowerActiveState() == true) then
+        if ok and res == true then
             started = true
             break
         end
-        print(string.format("[TOWER] รอความพร้อมเซิร์ฟเวอร์สำหรับ %s (ครั้งที่ %d/8)...", towerName, attempt))
-        task.wait(2.5)
-    end
-
-    if not started then
-        pcall(function() CancelTower:InvokeServer() end)
-        task.wait(3.5)
-        local okRescue, resRescue = pcall(function() return TowerCtrl.startTower(towerName) end)
-        if (okRescue and resRescue) or (getTowerActiveState() == true) then
-            started = true
-        end
+        print(string.format("[TOWER] รอความพร้อมเซิร์ฟเวอร์สำหรับ %s (ครั้งที่ %d/12)...", towerName, attempt))
+        task.wait(3.0)
     end
 
     if not started then
@@ -1142,18 +1215,40 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
     print("[TOWER] เริ่มหอคอยสำเร็จ:", towerName)
     setBanner(nil, loopStr .. "Floor 1 · กำลังต่อสู้...")
 
+    local towerStartTime = tick()
+
     task.spawn(function()
-        for _ = 1, 20 do
-            if HiddenBtn and HiddenBtn.Visible then
-                if firesignal then
-                    pcall(firesignal, HiddenBtn.Activated)
-                elseif HiddenBtn.Activate then
-                    pcall(function() HiddenBtn:Activate() end)
+        local su = setupvalue or (debug and debug.setupvalue)
+        local guv = getupvalue or (debug and debug.getupvalue)
+        if guv and su and TowerCtrl and TowerCtrl.startTower then
+            pcall(function()
+                local towerStartedFn = guv(TowerCtrl.startTower, 8)
+                if towerStartedFn then
+                    pcall(su, towerStartedFn, 2, true)
                 end
-                break
+            end)
+        end
+
+        task.wait(0.15)
+        for _ = 1, 20 do
+            if HiddenBtn and HiddenBtn:FindFirstChild("Label") and HiddenBtn.Label:IsA("TextLabel") then
+                if HiddenBtn.Label.Text == "Hide" then
+                    if firesignal then
+                        pcall(firesignal, HiddenBtn.Activated)
+                    elseif HiddenBtn.Activate then
+                        pcall(function() HiddenBtn:Activate() end)
+                    end
+                    task.wait(0.2)
+                    if HiddenBtn.Label.Text ~= "Hide" then
+                        break
+                    end
+                elseif HiddenBtn.Label.Text:match("Floor") then
+                    break
+                end
             end
             task.wait(0.1)
         end
+
         pcall(function()
             HUDController.showAll("inTower")
             if TowerScreen then TowerScreen.Visible = false end
@@ -1164,11 +1259,11 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
 
     task.wait(2.5)
 
-    local deadline = tick() + 1800
+    local deadline = tick() + 3600
     local finishConfirmCount = 0
-    local lastSeenFloor = nil
+    local lastSeenFloor = 1
     local lastFloorTime = tick()
-    local everActive = false
+    local everActive = true
 
     while CFG.AutoTowerQueue and tick() < deadline do
         local ctrlState = getTowerActiveState()
@@ -1179,18 +1274,19 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
 
         local currentFloor = nil
         if TowerScreen and TowerScreen:FindFirstChild("Floor") and TowerScreen.Floor:IsA("TextLabel") then
-            currentFloor = TowerScreen.Floor.Text:match("Floor (%d+)")
+            currentFloor = TowerScreen.Floor.Text:match("Floor%s*(%d+)")
         end
         if not currentFloor and HiddenBtn and HiddenBtn:FindFirstChild("Label") and HiddenBtn.Label:IsA("TextLabel") then
-            currentFloor = HiddenBtn.Label.Text:match("Floor (%d+)")
+            currentFloor = HiddenBtn.Label.Text:match("Floor%s*(%d+)")
         end
 
         if currentFloor then
-            if currentFloor ~= lastSeenFloor then
-                lastSeenFloor = currentFloor
+            local fNum = tonumber(currentFloor)
+            if fNum and fNum ~= lastSeenFloor then
+                lastSeenFloor = fNum
                 lastFloorTime = tick()
                 finishConfirmCount = 0
-                setBanner(nil, string.format("%sFloor %s · กำลังต่อสู้...", loopStr, currentFloor))
+                setBanner(nil, string.format("%sFloor %d · กำลังต่อสู้...", loopStr, fNum))
             end
         end
 
@@ -1204,32 +1300,41 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
             task.spawn(function()
                 pcall(function()
                     local MenuController = require(RS.Framework.Features.UI.MenuController)
-                    if MenuController and MenuController.CloseMenu then MenuController.CloseMenu() end
+                    local tr = UIReferences and UIReferences.Menus and UIReferences.Menus.TowerRewards
+                    if MenuController and MenuController.ActiveMenu and MenuController.ActiveMenu() == tr then
+                        MenuController.CloseMenu()
+                    end
                 end)
             end)
+            break
+        end
+
+        if _towerFinishedSignal and _towerFinishedSignal > towerStartTime then
+            print(string.format("[TOWER] จบการลงจากการแจ้งเตือนของเกม (Floor สูงสุด: %d)", lastSeenFloor or 1))
             break
         end
 
         if ctrlState == false and everActive then
             break
         elseif ctrlState == nil then
-            local isUiActive = false
-            if HiddenBtn and HiddenBtn.Visible and HiddenBtn:FindFirstChild("Label") and HiddenBtn.Label.Text:match("Floor") then
-                isUiActive = true
-            end
-            if TowerScreen and TowerScreen.Visible then
-                isUiActive = true
+            local isEndedByText = false
+            if HiddenBtn and HiddenBtn:FindFirstChild("Label") and HiddenBtn.Label:IsA("TextLabel") then
+                if HiddenBtn.Label.Text == "Hide" and everActive and (tick() - lastFloorTime >= 5) then
+                    isEndedByText = true
+                end
             end
 
-            if isUiActive then
-                finishConfirmCount = 0
-            else
-                if tick() - lastFloorTime >= 8 then
-                    finishConfirmCount = finishConfirmCount + 1
-                    if finishConfirmCount >= 5 then
-                        break
-                    end
+            if isEndedByText then
+                break
+            end
+
+            if tick() - lastFloorTime >= 90 then
+                finishConfirmCount = finishConfirmCount + 1
+                if finishConfirmCount >= 5 then
+                    break
                 end
+            else
+                finishConfirmCount = 0
             end
         end
 
@@ -1255,7 +1360,7 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
         end)
     end)
 
-    print("[TOWER] จบการลง:", towerName)
+    print("[TOWER] จบการลง:", towerName, string.format("(ชั้นสูงสุด: %d)", lastSeenFloor or 1))
     setBanner(nil, loopStr .. "จบการลงแล้ว กำลังเตรียมตัวรอบถัดไป...")
     if CFG.WebhookEnabled and CFG.WebhookNotifyTower then
         task.spawn(sendTowerWebhook, towerName, lastSeenFloor or 1, loopCount)
@@ -1288,18 +1393,23 @@ local function startTowerQueue()
     setBanner(string.format("⚔️ [1/%d] Preparing...", #queue), "กำลังเข้าสู่หอคอย...")
 
     _towerQueueThread = task.spawn(function()
-        local loopCount = 1
-        while CFG.AutoTowerQueue do
-            for idx, towerName in ipairs(queue) do
-                if not CFG.AutoTowerQueue then break end
-                runSingleTower(towerName, idx, #queue, loopCount)
-            end
+        local ok, err = pcall(function()
+            local loopCount = 1
+            while CFG.AutoTowerQueue do
+                for idx, towerName in ipairs(queue) do
+                    if not CFG.AutoTowerQueue then break end
+                    runSingleTower(towerName, idx, #queue, loopCount)
+                end
 
-            if not CFG.LoopTower then
-                break
-            end
+                if not CFG.LoopTower then
+                    break
+                end
 
-            loopCount = loopCount + 1
+                loopCount = loopCount + 1
+            end
+        end)
+        if not ok then
+            print("[TOWER ERROR]", err)
         end
 
         CFG.AutoTowerQueue = false
@@ -3406,6 +3516,20 @@ wm.TextStrokeTransparency=0.4; wm.TextStrokeColor3=Color3.new(0,0,0)
 end
 
 UIS.InputBegan:Connect(function(i,g)
+    if i.KeyCode==Enum.KeyCode.B and not UIS:GetFocusedTextBox() then
+        pcall(function()
+            local Backpack = UIReferences and UIReferences.Menus and UIReferences.Menus:FindFirstChild("Backpack")
+            local MenuController = require(RS.Framework.Features.UI.MenuController)
+            if Backpack and MenuController then
+                if MenuController.ActiveMenu and MenuController.ActiveMenu() == Backpack then
+                    MenuController.CloseMenu()
+                else
+                    MenuController.OpenMenu(Backpack)
+                end
+            end
+        end)
+        return
+    end
     if i.KeyCode==Enum.KeyCode.E then
         CFG.AutoCollect=not CFG.AutoCollect
         showNotif("Auto Collect: "..(CFG.AutoCollect and "ON" or "OFF")); return end
