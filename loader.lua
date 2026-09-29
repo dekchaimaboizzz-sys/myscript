@@ -9,7 +9,11 @@ local HttpService     = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local GuiService      = game:GetService("GuiService")
 local VirtualUser     = nil; pcall(function() VirtualUser = game:GetService("VirtualUser") end)
-local LP              = Players.LocalPlayer
+local LP = Players.LocalPlayer
+while not LP do
+    task.wait(0.1)
+    LP = Players.LocalPlayer
+end
 local RS              = game:GetService("ReplicatedStorage")
 local CFG = nil
 
@@ -20,12 +24,13 @@ end
 waitForLoad()
 
 -- ── Game Modules ──────────────────────────────────────────────────────────────
-local RealUpgrades      = require(RS.Framework.Features.Upgrades.Upgrades)
-local RealTreeStructure = require(RS.Framework.Features.Upgrades.TreeStructure)
-local RealTowers        = require(RS.Framework.Features.Towers.Towers)
-local TowerCtrl         = require(RS.Framework.Features.Towers.TowerController)
-local UIReferences      = require(RS.Framework.Features.UI.UIReferences)
-local HUDController     = require(RS.Framework.Features.UI.HUDController)
+local Framework = RS:FindFirstChild("Framework") or RS:WaitForChild("Framework", 15)
+local RealUpgrades      = nil; pcall(function() RealUpgrades = require(Framework.Features.Upgrades.Upgrades) end)
+local RealTreeStructure = nil; pcall(function() RealTreeStructure = require(Framework.Features.Upgrades.TreeStructure) end)
+local RealTowers        = nil; pcall(function() RealTowers = require(Framework.Features.Towers.Towers) end)
+local TowerCtrl         = nil; pcall(function() TowerCtrl = require(Framework.Features.Towers.TowerController) end)
+local UIReferences      = nil; pcall(function() UIReferences = require(Framework.Features.UI.UIReferences) end)
+local HUDController     = nil; pcall(function() HUDController = require(Framework.Features.UI.HUDController) end)
 local UnitUtil          = nil; pcall(function() UnitUtil = require(RS.Framework.Features.Inventory.Kinds.Unit.UnitUtil) end)
 local UnitController    = nil; pcall(function() UnitController = require(RS.Framework.Features.Inventory.Kinds.Unit.UnitController) end)
 local EntryRegistry     = nil; pcall(function() EntryRegistry = require(RS.Framework.Features.Inventory.EntryRegistry) end)
@@ -83,33 +88,45 @@ pcall(function()
 end)
 
 -- ── Remotes ───────────────────────────────────────────────────────────────────
-local NetRoot = RS:WaitForChild("Network", 15)
-assert(NetRoot, "[HUB] ไม่เจอ Network folder")
+local NetRoot = RS:FindFirstChild("Network") or RS:WaitForChild("Network", 10)
 
 local function RE(svc, name)
-    return NetRoot:WaitForChild(svc,10):WaitForChild("RE",10):WaitForChild(name,10)
+    if not NetRoot then return nil end
+    local s = NetRoot:FindFirstChild(svc) or NetRoot:WaitForChild(svc, 3)
+    if not s then return nil end
+    local re = s:FindFirstChild("RE") or s:WaitForChild("RE", 3)
+    if not re then return nil end
+    return re:FindFirstChild(name) or re:WaitForChild(name, 3)
 end
 local function RF(svc, name)
-    return NetRoot:WaitForChild(svc,10):WaitForChild("RF",10):WaitForChild(name,10)
+    if not NetRoot then return nil end
+    local s = NetRoot:FindFirstChild(svc) or NetRoot:WaitForChild(svc, 3)
+    if not s then return nil end
+    local rf = s:FindFirstChild("RF") or s:WaitForChild("RF", 3)
+    if not rf then return nil end
+    return rf:FindFirstChild(name) or rf:WaitForChild(name, 3)
 end
 local function REroot(name)
-    return NetRoot:WaitForChild("RE",10):WaitForChild(name,10)
+    if not NetRoot then return nil end
+    local re = NetRoot:FindFirstChild("RE") or NetRoot:WaitForChild("RE", 3)
+    if not re then return nil end
+    return re:FindFirstChild(name) or re:WaitForChild(name, 3)
 end
 
-local CollectBalance = RE("PlotService",     "CollectBalance")
-local EquipBest      = RE("PlotService",     "EquipBest")
-local LevelUpSlot    = RE("PlotService",     "LevelUpSlot")
-local InteractSlot   = RE("PlotService",     "InteractSlot")
+local CollectBalance = nil; pcall(function() CollectBalance = RE("PlotService", "CollectBalance") end)
+local EquipBest      = nil; pcall(function() EquipBest = RE("PlotService", "EquipBest") end)
+local LevelUpSlot    = nil; pcall(function() LevelUpSlot = RE("PlotService", "LevelUpSlot") end)
+local InteractSlot   = nil; pcall(function() InteractSlot = RE("PlotService", "InteractSlot") end)
 local EquipUnitRF    = nil; pcall(function() EquipUnitRF = RF("UnitService", "Equip") end)
 local UnequipUnitRF  = nil; pcall(function() UnequipUnitRF = RF("UnitService", "Unequip") end)
-local RebirthSignal  = RE("RebirthService",  "Rebirth")
-local QuestSignal    = RE("QuestService",    "Claim")
-local BuyDice        = RE("DiceShopService", "BuyDice")
-local EquipDice      = RE("DiceShopService", "EquipDice")
-local RollDice       = RF("RollService",     "RollDice")
-local BuyUpgrade     = REroot("BuyUpgrade")
-local CancelTower    = RF("Towers",          "CancelTower")
-local EquipBestTeam  = RE("Towers",          "EquipBestTowerTeam")
+local RebirthSignal  = nil; pcall(function() RebirthSignal = RE("RebirthService", "Rebirth") end)
+local QuestSignal    = nil; pcall(function() QuestSignal = RE("QuestService", "Claim") end)
+local BuyDice        = nil; pcall(function() BuyDice = RE("DiceShopService", "BuyDice") end)
+local EquipDice      = nil; pcall(function() EquipDice = RE("DiceShopService", "EquipDice") end)
+local RollDice       = nil; pcall(function() RollDice = RF("RollService", "RollDice") end)
+local BuyUpgrade     = nil; pcall(function() BuyUpgrade = REroot("BuyUpgrade") end)
+local CancelTower    = nil; pcall(function() CancelTower = RF("Towers", "CancelTower") end)
+local EquipBestTeam  = nil; pcall(function() EquipBestTeam = RE("Towers", "EquipBestTowerTeam") end)
 local UseBoost       = nil
 pcall(function() UseBoost = RE("BoostService", "Use") end)
 if not UseBoost then
@@ -149,23 +166,29 @@ print("[HUB] Remotes OK")
 
 local UPGRADE_PRICES = {}
 local UPGRADE_PARENT = {}
-for name, data in pairs(RealUpgrades) do
-    if name ~= "Start" and data.price then
-        UPGRADE_PRICES[name] = data.price
-        local parent = RealTreeStructure.GetParent(name)
-        if parent then UPGRADE_PARENT[name] = parent end
+if RealUpgrades then
+    for name, data in pairs(RealUpgrades) do
+        if name ~= "Start" and data.price then
+            UPGRADE_PRICES[name] = data.price
+            local parent = RealTreeStructure and RealTreeStructure.GetParent and RealTreeStructure.GetParent(name)
+            if parent then UPGRADE_PARENT[name] = parent end
+        end
     end
 end
 
 local ALL_TOWERS = {}
-for name, data in pairs(RealTowers.GetAll()) do
-    table.insert(ALL_TOWERS, {
-        name       = name,
-        order      = data.order or 99,
-        difficulty = (data.difficulty and data.difficulty.name) or "Normal"
-    })
+if RealTowers and type(RealTowers.GetAll) == "function" then
+    pcall(function()
+        for name, data in pairs(RealTowers.GetAll()) do
+            table.insert(ALL_TOWERS, {
+                name       = name,
+                order      = data.order or 99,
+                difficulty = (data.difficulty and data.difficulty.name) or "Normal"
+            })
+        end
+        table.sort(ALL_TOWERS, function(a,b) return a.order < b.order end)
+    end)
 end
-table.sort(ALL_TOWERS, function(a,b) return a.order < b.order end)
 
 local SelectedTowers = {}
 
@@ -185,91 +208,166 @@ for _, b in ipairs(SKILL_BRANCHES) do
     SelectedSkills[b.name] = true
 end
 
--- ── Luck Potions Definition (19 Potions across 6 Categories) ──────────────────
-local LUCK_CATEGORIES = {
-    {
-        id = "Luck",
-        name = "Standard Luck",
-        sub = "Luck I - IV (1.25x - 4.25x)",
-        items = {"Luck IV", "Luck III", "Luck II", "Luck I"}
+-- ── Potion & Boost Definitions (Luck / Cash / Damage across 6 Themes) ───────────
+local POTION_DATA = {
+    ["Luck"] = {
+        name = "Luck (เพิ่มค่าโชค)",
+        icon = "🍀",
+        categories = {
+            { id = "Luck",        name = "Standard Luck", sub = "Luck I - IV (1.25x - 4.25x)", items = {"Luck IV", "Luck III", "Luck II", "Luck I"} },
+            { id = "Dragon Luck", name = "Dragon Luck",   sub = "Dragon Luck I - III (1.25x - 2.0x)", items = {"Dragon Luck III", "Dragon Luck II", "Dragon Luck I"} },
+            { id = "Cursed Luck", name = "Cursed Luck",   sub = "Cursed Luck I - III (1.25x - 2.0x)", items = {"Cursed Luck III", "Cursed Luck II", "Cursed Luck I"} },
+            { id = "Pirate Luck", name = "Pirate Luck",   sub = "Pirate Luck I - III (1.5x - 3.0x)", items = {"Pirate Luck III", "Pirate Luck II", "Pirate Luck I"} },
+            { id = "Leaf Luck",   name = "Leaf Luck",     sub = "Leaf Luck I - III (2.0x - 4.0x)", items = {"Leaf Luck III", "Leaf Luck II", "Leaf Luck I"} },
+            { id = "Slayer Luck", name = "Slayer Luck",   sub = "Slayer Luck I - III (2.0x - 4.0x)", items = {"Slayer Luck III", "Slayer Luck II", "Slayer Luck I"} },
+        }
     },
-    {
-        id = "Dragon Luck",
-        name = "Dragon Luck",
-        sub = "Dragon Luck I - III (1.25x - 2.0x)",
-        items = {"Dragon Luck III", "Dragon Luck II", "Dragon Luck I"}
+    ["Cash"] = {
+        name = "Cash (เพิ่มตัวคูณเงิน)",
+        icon = "💰",
+        categories = {
+            { id = "Income",        name = "Standard Income", sub = "Income I - IV (1.25x - 4.0x)", items = {"Income IV", "Income III", "Income II", "Income I"} },
+            { id = "Dragon Income", name = "Dragon Income",   sub = "Dragon Income I - III (1.25x - 2.0x)", items = {"Dragon Income III", "Dragon Income II", "Dragon Income I"} },
+            { id = "Cursed Income", name = "Cursed Income",   sub = "Cursed Income I - III (1.25x - 2.0x)", items = {"Cursed Income III", "Cursed Income II", "Cursed Income I"} },
+            { id = "Pirate Income", name = "Pirate Income",   sub = "Pirate Income I - III (1.5x - 3.0x)", items = {"Pirate Income III", "Pirate Income II", "Pirate Income I"} },
+            { id = "Leaf Income",   name = "Leaf Income",     sub = "Leaf Income I - III (2.0x - 4.0x)", items = {"Leaf Income III", "Leaf Income II", "Leaf Income I"} },
+            { id = "Slayer Income", name = "Slayer Income",   sub = "Slayer Income I - III (2.0x - 4.0x)", items = {"Slayer Income III", "Slayer Income II", "Slayer Income I"} },
+        }
     },
-    {
-        id = "Cursed Luck",
-        name = "Cursed Luck",
-        sub = "Cursed Luck I - III (1.25x - 2.0x)",
-        items = {"Cursed Luck III", "Cursed Luck II", "Cursed Luck I"}
-    },
-    {
-        id = "Pirate Luck",
-        name = "Pirate Luck",
-        sub = "Pirate Luck I - III (1.5x - 3.0x)",
-        items = {"Pirate Luck III", "Pirate Luck II", "Pirate Luck I"}
-    },
-    {
-        id = "Leaf Luck",
-        name = "Leaf Luck",
-        sub = "Leaf Luck I - III (2.0x - 4.0x)",
-        items = {"Leaf Luck III", "Leaf Luck II", "Leaf Luck I"}
-    },
-    {
-        id = "Slayer Luck",
-        name = "Slayer Luck",
-        sub = "Slayer Luck I - III (2.0x - 4.0x)",
-        items = {"Slayer Luck III", "Slayer Luck II", "Slayer Luck I"}
-    },
+    ["Damage"] = {
+        name = "Damage (เพิ่มพลังโจมตี)",
+        icon = "⚔️",
+        categories = {
+            { id = "Damage",        name = "Standard Damage", sub = "Damage I - IV (1.5x - 5.0x)", items = {"Damage IV", "Damage III", "Damage II", "Damage I"} },
+            { id = "Dragon Damage", name = "Dragon Damage",   sub = "Dragon Damage I - III (1.25x - 2.0x)", items = {"Dragon Damage III", "Dragon Damage II", "Dragon Damage I"} },
+            { id = "Cursed Damage", name = "Cursed Damage",   sub = "Cursed Damage I - III (1.25x - 2.0x)", items = {"Cursed Damage III", "Cursed Damage II", "Cursed Damage I"} },
+            { id = "Pirate Damage", name = "Pirate Damage",   sub = "Pirate Damage I - III (1.5x - 3.0x)", items = {"Pirate Damage III", "Pirate Damage II", "Pirate Damage I"} },
+            { id = "Leaf Damage",   name = "Leaf Damage",     sub = "Leaf Damage I - III (2.0x - 4.0x)", items = {"Leaf Damage III", "Leaf Damage II", "Leaf Damage I"} },
+            { id = "Slayer Damage", name = "Slayer Damage",   sub = "Slayer Damage I - III (2.0x - 4.0x)", items = {"Slayer Damage III", "Slayer Damage II", "Slayer Damage I"} },
+        }
+    }
 }
-local SelectedLuckCategories = {}
-for _, cat in ipairs(LUCK_CATEGORIES) do
-    SelectedLuckCategories[cat.id] = true
+local LUCK_CATEGORIES = POTION_DATA["Luck"].categories
+local SelectedPotionCategories = {
+    ["Luck"] = {},
+    ["Cash"] = {},
+    ["Damage"] = {}
+}
+for pType, data in pairs(POTION_DATA) do
+    for _, cat in ipairs(data.categories) do
+        SelectedPotionCategories[pType][cat.id] = true
+    end
 end
+local SelectedLuckCategories = SelectedPotionCategories["Luck"]
 
 -- ── Constants ─────────────────────────────────────────────────────────────────
-local REBIRTH_COSTS = {
-    [1]=50000,[2]=5000000,[3]=500000000,[4]=50000000000,
-    [5]=5000000000000,[6]=500000000000000,[7]=1e16,
-    [8]=1e18,[9]=1e20,[10]=1e22,[11]=1e24,[12]=1e26,[13]=1e28,
-}
-local QUEST_PERIODS = {
-    Daily  = {"Playtime","Rolls","Towers","UnitsSold"},
-    Weekly = {"Playtime","Rolls","Towers","UnitsSold"},
-}
-local DICE_LIST = {
-    {name="Frostfire",  luck=950000000,  price=2.5e26},
-    {name="Ethereal",   luck=375000000,  price=1e25},
-    {name="Toxic",      luck=150000000,  price=7.5e23},
-    {name="Cyber",      luck=62500000,   price=1e23},
-    {name="Chrono",     luck=25000000,   price=1.5e22},
-    {name="Titan",      luck=10000000,   price=1e21},
-    {name="Corrupted",  luck=5000000,    price=1.5e20},
-    {name="Arcane",     luck=2000000,    price=1.2e19},
-    {name="Prismatic",  luck=1000000,    price=1e18},
-    {name="Royal",      luck=400000,     price=1e17},
-    {name="Dragon",     luck=200000,     price=8.5e15},
-    {name="Black Hole", luck=100000,     price=1e15},
-    {name="Galaxy",     luck=50000,      price=1.5e14},
-    {name="Lunar",      luck=25000,      price=3.75e13},
-    {name="Solar",      luck=12500,      price=5e12},
-    {name="Void",       luck=6000,       price=7.5e11},
-    {name="Blood Moon", luck=3000,       price=1e11},
-    {name="Light",      luck=1500,       price=1.2e10},
-    {name="Shadow",     luck=750,        price=1.5e9},
-    {name="Storm",      luck=400,        price=2e8},
-    {name="Magma",      luck=200,        price=3e7},
-    {name="Ice",        luck=100,        price=4e6},
-    {name="Lightning",  luck=42.5,       price=500000},
-    {name="Nature",     luck=20,         price=75000},
-    {name="Water",      luck=10,         price=10000},
-    {name="Fire",       luck=5,          price=2500},
-    {name="Normal",     luck=2,          price=1},
-}
+-- ── Real-time Auto-Fetch from Game Modules ──────────────────────────────────────
+local REBIRTH_COSTS = {}
+pcall(function()
+    local GameRebirths = require(RS.Framework.Features.Rebirth.Rebirths)
+    if GameRebirths and GameRebirths.Get then
+        for t = 1, 100 do
+            local inf = GameRebirths.Get(t)
+            if inf and inf.cost then
+                REBIRTH_COSTS[t] = inf.cost
+            else
+                break
+            end
+        end
+    end
+end)
+-- Fallback if module failed
+if not next(REBIRTH_COSTS) then
+    REBIRTH_COSTS = {
+        [1]=50000,[2]=5000000,[3]=500000000,[4]=50000000000,
+        [5]=5000000000000,[6]=500000000000000,[7]=1e16,
+        [8]=1e18,[9]=1e20,[10]=1e22,[11]=1e24,[12]=1e26,[13]=1e28,[14]=1e30,
+    }
+end
 
-local SLOT_COUNT   = 15
+local QUEST_PERIODS = {
+    Daily  = {},
+    Weekly = {}
+}
+pcall(function()
+    local QC = require(RS.Framework.Features.Quests.QuestConfig)
+    if QC and QC.Periods then
+        for periodKey, pData in pairs(QC.Periods) do
+            QUEST_PERIODS[periodKey] = {}
+            if pData.quests then
+                for _, q in ipairs(pData.quests) do
+                    table.insert(QUEST_PERIODS[periodKey], q.id)
+                end
+            end
+        end
+    end
+end)
+if #QUEST_PERIODS.Daily == 0 then
+    QUEST_PERIODS.Daily  = {"Playtime","Rolls","Towers","UnitsSold"}
+    QUEST_PERIODS.Weekly = {"Playtime","Rolls","Towers","UnitsSold"}
+end
+
+local DICE_LIST = {}
+pcall(function()
+    local GameDice = require(RS.Framework.Features.Rolling.Dice)
+    if GameDice and GameDice.GetAll then
+        local all = GameDice.GetAll()
+        if all and type(all) == "table" then
+            for dName, dData in pairs(all) do
+                if dData and dData.luck then
+                    table.insert(DICE_LIST, {
+                        name  = dName,
+                        luck  = tonumber(dData.luck) or 1,
+                        price = tonumber(dData.price) or 0
+                    })
+                end
+            end
+            table.sort(DICE_LIST, function(a, b) return a.luck > b.luck end)
+        end
+    end
+end)
+if #DICE_LIST == 0 then
+    DICE_LIST = {
+        {name="Radiant",    luck=5000000000, price=1e29},
+        {name="Alchemy",    luck=2000000000, price=5e27},
+        {name="Frostfire",  luck=950000000,  price=2.5e26},
+        {name="Ethereal",   luck=375000000,  price=1e25},
+        {name="Toxic",      luck=150000000,  price=7.5e23},
+        {name="Cyber",      luck=62500000,   price=1e23},
+        {name="Chrono",     luck=25000000,   price=1.5e22},
+        {name="Titan",      luck=10000000,   price=1e21},
+        {name="Corrupted",  luck=5000000,    price=1.5e20},
+        {name="Arcane",     luck=2000000,    price=1.2e19},
+        {name="Prismatic",  luck=1000000,    price=1e18},
+        {name="Royal",      luck=400000,     price=1e17},
+        {name="Dragon",     luck=200000,     price=8.5e15},
+        {name="Black Hole", luck=100000,     price=1e15},
+        {name="Galaxy",     luck=50000,      price=1.5e14},
+        {name="Lunar",      luck=25000,      price=3.75e13},
+        {name="Solar",      luck=12500,      price=5e12},
+        {name="Void",       luck=6000,       price=7.5e11},
+        {name="Blood Moon", luck=3000,       price=1e11},
+        {name="Light",      luck=1500,       price=1.2e10},
+        {name="Shadow",     luck=750,        price=1.5e9},
+        {name="Storm",      luck=400,        price=2e8},
+        {name="Magma",      luck=200,        price=3e7},
+        {name="Ice",        luck=100,        price=4e6},
+        {name="Lightning",  luck=42.5,       price=500000},
+        {name="Nature",     luck=20,         price=75000},
+        {name="Water",      luck=10,         price=10000},
+        {name="Fire",       luck=5,          price=2500},
+        {name="Normal",     luck=2,          price=1},
+    }
+end
+
+local function getGameMaxSlots()
+    local maxSlots = 16
+    if PlotConfig and PlotConfig.GetMaxSlots then
+        pcall(function() maxSlots = PlotConfig.GetMaxSlots() or maxSlots end)
+    end
+    return maxSlots
+end
+local SLOT_COUNT = getGameMaxSlots()
 local ROLL_DELAY   = 2.6
 local COLLECT_LOOP = 1
 local EQUIP_LOOP   = 5
@@ -304,6 +402,14 @@ CFG = {
     Disable3DRender        = false,
     SuperRAMSaver          = false,
     HideGameUI             = false,
+    LowDetailMode          = false,
+    HideOtherPlayers       = false,
+    DisableWeatherFX       = false,
+    DisableParticles       = false,
+    HidePlotUnits          = false,
+    SelectedTeleport       = "MyPlot",
+    PotionType             = "Luck",
+    AutoUsePotion          = false,
     AutoUseLuck            = false,
     AutoLuckOnEvent        = false,
     WeatherNotifyScreen    = true,
@@ -317,23 +423,31 @@ CFG = {
     WebhookStatsInterval   = 15,
 }
 
-local FONT = Enum.Font.RobotoMono
+local FONT        = Enum.Font.Gotham
+local FONT_BOLD   = Enum.Font.GothamBold
+local FONT_MEDIUM = Enum.Font.GothamMedium
+
+-- 540 HUB High-Clarity Dark-Purple Aesthetic Palette
 local DARK = {
-    bg      = Color3.fromRGB(12,12,15),
-    sidebar = Color3.fromRGB(15,15,20),
-    header  = Color3.fromRGB(18,18,24),
-    hAccent = Color3.fromRGB(0,200,255),
-    item    = Color3.fromRGB(25,25,30),
-    itemSel = Color3.fromRGB(42,30,62),
-    text    = Color3.fromRGB(220,220,230),
-    subtext = Color3.fromRGB(130,130,145),
-    accent  = Color3.fromRGB(0,200,255),
-    border  = Color3.fromRGB(35,35,45),
-    tOn     = Color3.fromRGB(0,150,255),
-    tOff    = Color3.fromRGB(45,45,55),
-    purple  = Color3.fromRGB(150,105,255),
-    red     = Color3.fromRGB(200,55,65),
-    dropdown= Color3.fromRGB(20,20,26),
+    bg       = Color3.fromRGB(13, 10, 19),        -- Main background (Deep Dark Purple)
+    sidebar  = Color3.fromRGB(16, 12, 24),       -- Sidebar background
+    header   = Color3.fromRGB(19, 14, 28),       -- Header top bar
+    hAccent  = Color3.fromRGB(175, 55, 255),     -- Vibrant Purple Neon
+    banner   = Color3.fromRGB(145, 15, 245),     -- Banner Header color
+    item     = Color3.fromRGB(23, 17, 33),       -- Card item background (Better contrast)
+    card     = Color3.fromRGB(23, 17, 33),       -- Card item background
+    itemSel  = Color3.fromRGB(52, 26, 85),       -- Selected tab / item
+    text     = Color3.fromRGB(255, 255, 255),    -- Pure White Text (High Clarity)
+    subtext  = Color3.fromRGB(195, 188, 222),    -- Bright Crisp Subtext (High Readability)
+    accent   = Color3.fromRGB(175, 55, 255),     -- Accent neon purple
+    border   = Color3.fromRGB(50, 36, 72),       -- Crisp Card Border
+    tOn      = Color3.fromRGB(175, 55, 255),     -- Toggle ON (Vibrant Purple)
+    tOff     = Color3.fromRGB(48, 38, 64),       -- Toggle OFF (Muted dark slate)
+    purple   = Color3.fromRGB(175, 55, 255),     -- Neon Purple
+    red      = Color3.fromRGB(255, 65, 130),     -- Close button Pinkish-Red
+    dropdown = Color3.fromRGB(26, 19, 38),       -- Dropdown menu background
+    inputBg  = Color3.fromRGB(36, 28, 52),       -- Input box background
+    searchBg = Color3.fromRGB(28, 21, 40),       -- Search bar background
 }
 
 -- ── DataController ────────────────────────────────────────────────────────────
@@ -621,7 +735,8 @@ end
 
 -- ── Cheat functions ───────────────────────────────────────────────────────────
 local function collectAll()
-    for s=1,SLOT_COUNT do
+    local maxS = getGameMaxSlots()
+    for s=1,maxS do
         task.spawn(function() pcall(function() CollectBalance:FireServer(s) end) end)
     end
 end
@@ -813,7 +928,8 @@ local function equipBestByRarity(notify)
 
             local reb = getRebirthLevel()
             local unlocked = {}
-            for s = 1, SLOT_COUNT do
+            local maxS = getGameMaxSlots()
+            for s = 1, maxS do
                 local req = 0
                 if PlotConfig and PlotConfig.GetSlotRebirthRequirement then
                     pcall(function() req = PlotConfig.GetSlotRebirthRequirement(s) or 0 end)
@@ -964,8 +1080,9 @@ local function autoUpgradePlots()
     local DC = getDC()
     if not DC then return end
 
+    local maxS = getGameMaxSlots()
     local candidates = {}
-    for s = 1, SLOT_COUNT do
+    for s = 1, maxS do
         local unlocked = true
         if PlotConfig and PlotConfig.GetSlotRebirthRequirement then
             unlocked = (getRebirthLevel() >= PlotConfig.GetSlotRebirthRequirement(s))
@@ -1443,17 +1560,20 @@ local function stopTowerQueue()
     setBanner("⏹ Queue Cancelled", "หยุดการทำงานแล้ว พร้อมเริ่มรอบใหม่")
 end
 
--- ── Luck Potions Logic ────────────────────────────────────────────────────────
+-- ── Multi-Category Potions Logic (Luck / Cash / Damage) ───────────────────────
 local EntryRegistry = nil
 pcall(function() EntryRegistry = require(RS.Framework.Features.Inventory.EntryRegistry) end)
 
-local function getLuckPotionsInInventory()
+local function getPotionsInInventory(pType)
     local DC = getDC()
     if not DC or not DC.Inventory then return {}, 0 end
     local inv = DC.Inventory() or {}
     local counts = {}
     local total = 0
-    for _, cat in ipairs(LUCK_CATEGORIES) do
+    local targetType = pType or (CFG and CFG.PotionType) or "Luck"
+    local pData = POTION_DATA[targetType]
+    if not pData then return {}, 0 end
+    for _, cat in ipairs(pData.categories) do
         counts[cat.id] = 0
         for _, itemName in ipairs(cat.items) do
             local entry = inv[itemName]
@@ -1466,19 +1586,29 @@ local function getLuckPotionsInInventory()
     return counts, total
 end
 
-local function getActiveLuckInfo()
+local function getLuckPotionsInInventory()
+    return getPotionsInInventory("Luck")
+end
+
+local function getActivePotionInfo(pType)
     local DC = getDC()
     if not DC or not DC.ActiveEntries then return {} end
     local act = DC.ActiveEntries() or {}
     local now = workspace:GetServerTimeNow()
     local activeMap = {}
+    local targetType = pType or (CFG and CFG.PotionType) or "Luck"
+    local pData = POTION_DATA[targetType]
+    local targetCats = {}
+    if pData then
+        for _, cat in ipairs(pData.categories) do targetCats[cat.id] = true end
+    end
 
     for actKey, actData in pairs(act) do
         local cfg = nil
         if EntryRegistry and EntryRegistry.getEntryConfig then
             pcall(function() cfg = EntryRegistry.getEntryConfig(actData.name or actKey) end)
         end
-        if cfg and cfg.kind == "Boost" and cfg.category and cfg.category:find("Luck") then
+        if cfg and cfg.kind == "Boost" and cfg.category and (targetCats[cfg.category] or cfg.category:find(targetType)) then
             local rem = 0
             if actData.remaining and typeof(actData.remaining) == "number" then
                 local started = actData.startedAt or now
@@ -1496,6 +1626,10 @@ local function getActiveLuckInfo()
         end
     end
     return activeMap
+end
+
+local function getActiveLuckInfo()
+    return getActivePotionInfo("Luck")
 end
 
 local BoostController = nil
@@ -1523,16 +1657,20 @@ local function fireUseBoost(potionName)
     return sent
 end
 
-local function autoUseLuckPotions()
+local function autoUsePotions()
     local DC = getDC()
     if not DC or not DC.Inventory then return end
     local inv = DC.Inventory() or {}
-    local activeMap = getActiveLuckInfo()
+    local targetType = (CFG and CFG.PotionType) or "Luck"
+    local pData = POTION_DATA[targetType]
+    if not pData then return end
 
-    for _, cat in ipairs(LUCK_CATEGORIES) do
-        if SelectedLuckCategories[cat.id] ~= false then
+    local activeMap = getActivePotionInfo(targetType)
+    local typeSels = SelectedPotionCategories[targetType] or {}
+
+    for _, cat in ipairs(pData.categories) do
+        if typeSels[cat.id] ~= false then
             local curActive = activeMap[cat.id]
-            -- If active buff has 3s or less remaining, consume the best potion in this category
             if not curActive or curActive.remaining <= 3 then
                 for _, potionName in ipairs(cat.items) do
                     local itemEntry = inv[potionName]
@@ -1548,17 +1686,27 @@ local function autoUseLuckPotions()
     end
 end
 
-local function useBestLuckNow(forceAllCategories)
+local function autoUseLuckPotions()
+    autoUsePotions()
+end
+
+local function useBestPotionNow(pType, forceAllCategories)
     local DC = getDC()
     if not DC or not DC.Inventory then
         pcall(function() showNotif("ไม่สามารถอ่านข้อมูล Inventory ได้") end)
         return 0
     end
+    local targetType = pType or (CFG and CFG.PotionType) or "Luck"
+    local pData = POTION_DATA[targetType]
+    if not pData then return 0 end
+
     local inv = DC.Inventory() or {}
     local usedCount = 0
+    local typeSels = SelectedPotionCategories[targetType] or {}
 
-    for _, cat in ipairs(LUCK_CATEGORIES) do
-        if forceAllCategories or (SelectedLuckCategories[cat.id] ~= false) then
+    for _, cat in ipairs(pData.categories) do
+        if forceAllCategories or (typeSels[cat.id] ~= false) then
+            -- Use the single highest tier potion available in this category
             for _, potionName in ipairs(cat.items) do
                 local itemEntry = inv[potionName]
                 local amt = itemEntry and itemEntry.amount or 0
@@ -1566,19 +1714,23 @@ local function useBestLuckNow(forceAllCategories)
                     fireUseBoost(potionName)
                     usedCount = usedCount + 1
                     task.wait(0.05)
-                    break
+                    break -- Distinct per category (ไม่ซ้ำกัน!)
                 end
             end
         end
     end
     if not forceAllCategories then
         if usedCount > 0 then
-            pcall(function() showNotif("⚡ กดใช้น้ำยาโชคระดับสูงสุด " .. usedCount .. " หมวดหมู่แล้ว ✓") end)
+            pcall(function() showNotif("⚡ ใช้น้ำยา " .. targetType .. " สูงสุด " .. usedCount .. " ชนิดเรียบร้อย ✓") end)
         else
-            pcall(function() showNotif("ไม่มีน้ำยาโชคในหมวดหมู่ที่เลือกอยู่ในกระเป๋า") end)
+            pcall(function() showNotif("ไม่มีน้ำยา " .. targetType .. " ในหมวดหมู่ที่เลือกอยู่ในกระเป๋า") end)
         end
     end
     return usedCount
+end
+
+local function useBestLuckNow(forceAllCategories)
+    return useBestPotionNow("Luck", forceAllCategories)
 end
 
 -- ── Weather (Server Event) Observer ───────────────────────────────────────────
@@ -1599,7 +1751,7 @@ local function getWeatherBuffText(wName)
 end
 
 local function updateWeatherUI()
-    if not weatherUIElements then return end
+    if not weatherUIElements or not weatherUIElements.icon then return end
     pcall(function()
         if currentServerWeather and currentServerWeather.name then
             local wName = tostring(currentServerWeather.name)
@@ -1747,9 +1899,30 @@ task.spawn(function()
         end
     end
 end)
-task.spawn(function() while true do task.wait(REBIRTH_LOOP)
-    if CFG.AutoRebirth then tryRebirth() end
-end end)
+local _lastRebirthTier = nil
+task.spawn(function()
+    while true do
+        task.wait(REBIRTH_LOOP)
+        pcall(function()
+            local curLvl = getRebirthLevel()
+            if _lastRebirthTier == nil then
+                _lastRebirthTier = curLvl
+            elseif curLvl > _lastRebirthTier then
+                _lastRebirthTier = curLvl
+                task.wait(0.8)
+                if CFG.AutoEquip then
+                    if CFG.AutoEquipMode == "Rarity" then
+                        equipBestByRarity(false)
+                    else
+                        pcall(function() EquipBest:FireServer() end)
+                    end
+                end
+                showNotif(string.format("Rebirth Tier %d สำเร็จ! อัปเดตการวางยูนิตลง Plot ใหม่ครบทุกช่อง ✓", curLvl))
+            end
+        end)
+        if CFG.AutoRebirth then tryRebirth() end
+    end
+end)
 task.spawn(function() while true do task.wait(QUEST_LOOP)
     if CFG.AutoQuest then claimAllQuests() end
 end end)
@@ -1766,7 +1939,7 @@ task.spawn(function() while true do task.wait(PLOT_UPGRADE_LOOP)
     if CFG.AutoUpgradePlot then autoUpgradePlots() end
 end end)
 task.spawn(function() while true do task.wait(2)
-    if CFG.AutoUseLuck then pcall(autoUseLuckPotions) end
+    if CFG.AutoUseLuck or CFG.AutoUsePotion then pcall(autoUsePotions) end
 end end)
 task.spawn(function() while true do task.wait(60)
     if CFG.AntiAFK then
@@ -1837,6 +2010,371 @@ local function toggleBoostFPS(enable)
             _fpsConn:Disconnect()
             _fpsConn = nil
         end
+    end
+end
+
+local UtilityFeatures = {}
+
+do
+    local _otherPlayersConn = nil
+    local _charAddedConns = {}
+
+    local function setCharHidden(char, hidden)
+        if not char then return end
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                if hidden then
+                    if part:GetAttribute("OrigTransparency") == nil then
+                        part:SetAttribute("OrigTransparency", part.Transparency)
+                    end
+                    part.Transparency = 1
+                    part.CanCollide = false
+                    part.CastShadow = false
+                else
+                    local orig = part:GetAttribute("OrigTransparency")
+                    part.Transparency = (orig ~= nil) and orig or 0
+                end
+            elseif part:IsA("Decal") then
+                if hidden then
+                    if part:GetAttribute("OrigTransparency") == nil then
+                        part:SetAttribute("OrigTransparency", part.Transparency)
+                    end
+                    part.Transparency = 1
+                else
+                    local orig = part:GetAttribute("OrigTransparency")
+                    part.Transparency = (orig ~= nil) and orig or 0
+                end
+            elseif part:IsA("ParticleEmitter") or part:IsA("Trail") or part:IsA("Beam") or part:IsA("Fire") or part:IsA("Smoke") or part:IsA("Sparkles") then
+                part.Enabled = not hidden
+            elseif part:IsA("BillboardGui") or part:IsA("SurfaceGui") then
+                part.Enabled = not hidden
+            end
+        end
+    end
+
+    function UtilityFeatures.toggleHideOtherPlayers(enable)
+        CFG.HideOtherPlayers = enable
+        if enable then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LP then
+                    if plr.Character then setCharHidden(plr.Character, true) end
+                    if not _charAddedConns[plr] then
+                        _charAddedConns[plr] = plr.CharacterAdded:Connect(function(c)
+                            if CFG.HideOtherPlayers then
+                                task.wait(0.2)
+                                setCharHidden(c, true)
+                            end
+                        end)
+                    end
+                end
+            end
+            if not _otherPlayersConn then
+                _otherPlayersConn = Players.PlayerAdded:Connect(function(plr)
+                    if plr ~= LP then
+                        _charAddedConns[plr] = plr.CharacterAdded:Connect(function(c)
+                            if CFG.HideOtherPlayers then
+                                task.wait(0.2)
+                                setCharHidden(c, true)
+                            end
+                        end)
+                    end
+                end)
+            end
+        else
+            if _otherPlayersConn then
+                _otherPlayersConn:Disconnect()
+                _otherPlayersConn = nil
+            end
+            for plr, conn in pairs(_charAddedConns) do
+                pcall(function() conn:Disconnect() end)
+                if plr.Character then setCharHidden(plr.Character, false) end
+            end
+            table.clear(_charAddedConns)
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LP and plr.Character then
+                    setCharHidden(plr.Character, false)
+                end
+            end
+        end
+    end
+
+    function UtilityFeatures.toggleDisableWeatherFX(enable)
+        CFG.DisableWeatherFX = enable
+        pcall(function()
+            LP:SetAttribute("WindDisabled", enable)
+        end)
+        pcall(function()
+            for _, inst in ipairs(Lighting:GetDescendants()) do
+                if inst:IsA("Atmosphere") or inst:IsA("Clouds") or inst:IsA("BloomEffect") or inst:IsA("SunRaysEffect") then
+                    inst.Enabled = not enable
+                end
+            end
+            if enable then
+                Lighting.FogEnd = 9e9
+            end
+        end)
+        if enable then
+            for _, inst in ipairs(workspace:GetDescendants()) do
+                local name = inst.Name:lower()
+                if name:find("rain") or name:find("snow") or name:find("weather") or name:find("cloud") or name:find("wind") or name:find("storm") then
+                    if inst:IsA("ParticleEmitter") or inst:IsA("Beam") or inst:IsA("Trail") then
+                        inst.Enabled = false
+                    end
+                end
+            end
+        end
+    end
+
+    local _particleConn = nil
+    function UtilityFeatures.toggleDisableParticles(enable)
+        CFG.DisableParticles = enable
+        if enable then
+            for _, inst in ipairs(workspace:GetDescendants()) do
+                if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Fire") or inst:IsA("Smoke") or inst:IsA("Sparkles") or inst:IsA("Highlight") then
+                    inst.Enabled = false
+                end
+            end
+            if not _particleConn then
+                _particleConn = workspace.DescendantAdded:Connect(function(inst)
+                    if CFG.DisableParticles then
+                        if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Fire") or inst:IsA("Smoke") or inst:IsA("Sparkles") or inst:IsA("Highlight") then
+                            task.defer(function() pcall(function() inst.Enabled = false end) end)
+                        end
+                    end
+                end)
+            end
+        else
+            if _particleConn then
+                _particleConn:Disconnect()
+                _particleConn = nil
+            end
+        end
+    end
+
+    local _plotUnitsConn = nil
+
+    local function setPlotInstHidden(inst, hidden)
+        if inst:IsA("BasePart") then
+            if hidden then
+                if inst:GetAttribute("PlotOrigTrans") == nil then
+                    inst:SetAttribute("PlotOrigTrans", inst.Transparency)
+                end
+                inst.Transparency = 1
+                inst.CastShadow = false
+            else
+                local orig = inst:GetAttribute("PlotOrigTrans")
+                inst.Transparency = (orig ~= nil) and orig or 0
+            end
+        elseif inst:IsA("Decal") then
+            if hidden then
+                if inst:GetAttribute("PlotOrigTrans") == nil then
+                    inst:SetAttribute("PlotOrigTrans", inst.Transparency)
+                end
+                inst.Transparency = 1
+            else
+                local orig = inst:GetAttribute("PlotOrigTrans")
+                inst.Transparency = (orig ~= nil) and orig or 0
+            end
+        elseif inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Highlight") then
+            inst.Enabled = not hidden
+        elseif inst:IsA("BillboardGui") or inst:IsA("SurfaceGui") then
+            if inst.Name ~= "UpgradeBoard" and inst.Name ~= "SlotPrompt" then
+                inst.Enabled = not hidden
+            end
+        end
+    end
+
+    local function applyHideToPlot(plot, hidden)
+        local slots = plot:FindFirstChild("Slots")
+        if not slots then return end
+        for _, slot in ipairs(slots:GetChildren()) do
+            for _, inst in ipairs(slot:GetDescendants()) do
+                setPlotInstHidden(inst, hidden)
+            end
+        end
+    end
+
+    function UtilityFeatures.toggleHidePlotUnits(enable)
+        CFG.HidePlotUnits = enable
+        local plotsFolder = workspace:FindFirstChild("Plots")
+        local claimed = plotsFolder and plotsFolder:FindFirstChild("Claimed")
+        if claimed then
+            for _, plot in ipairs(claimed:GetChildren()) do
+                applyHideToPlot(plot, enable)
+            end
+        end
+        if enable then
+            if not _plotUnitsConn and plotsFolder then
+                _plotUnitsConn = plotsFolder.DescendantAdded:Connect(function(inst)
+                    if CFG.HidePlotUnits then
+                        task.defer(function()
+                            local p = inst.Parent
+                            local inSlot = false
+                            while p and p ~= plotsFolder do
+                                if p.Name == "Slots" then inSlot = true break end
+                                p = p.Parent
+                            end
+                            if inSlot then
+                                setPlotInstHidden(inst, true)
+                            end
+                        end)
+                    end
+                end)
+            end
+        else
+            if _plotUnitsConn then
+                _plotUnitsConn:Disconnect()
+                _plotUnitsConn = nil
+            end
+        end
+    end
+
+    function UtilityFeatures.toggleLowDetailMode(enable)
+        CFG.LowDetailMode = enable
+        UtilityFeatures.toggleDisableWeatherFX(enable)
+        UtilityFeatures.toggleHideOtherPlayers(enable)
+        UtilityFeatures.toggleHidePlotUnits(enable)
+        UtilityFeatures.toggleDisableParticles(enable)
+        toggleBoostFPS(enable)
+    end
+
+    UtilityFeatures.TeleportLocations = {
+        {
+            id = "MyPlot",
+            name = "🏠 My Plot (ฐานของฉัน)",
+            sub = "ฐานและสายพานสุ่มของตัวเอง",
+            getPos = function()
+                local plotId = nil
+                pcall(function()
+                    local Property = require(RS.Packages.Network).ClientComm.new(RS.Network, false, "PlotService"):GetProperty("PlotId")
+                    plotId = Property and Property:Get()
+                end)
+                if plotId and workspace:FindFirstChild("Plots") and workspace.Plots:FindFirstChild("Claimed") then
+                    local plot = workspace.Plots.Claimed:FindFirstChild(plotId)
+                    if plot then
+                        local sp = plot:FindFirstChild("Spawn") or plot:FindFirstChild("Conveyor")
+                        if sp and sp:IsA("BasePart") then
+                            return sp.Position + Vector3.new(0, 3.5, 0)
+                        end
+                    end
+                end
+                if workspace:FindFirstChild("Plots") and workspace.Plots:FindFirstChild("Claimed") then
+                    for _, p in ipairs(workspace.Plots.Claimed:GetChildren()) do
+                        local sp = p:FindFirstChild("Spawn")
+                        if sp and sp:IsA("BasePart") then
+                            return sp.Position + Vector3.new(0, 3.5, 0)
+                        end
+                    end
+                end
+                return Vector3.new(0, 5, 0)
+            end
+        },
+        {
+            id = "Tower",
+            name = "🏰 Tower Entrance (หอคอย)",
+            sub = "ประตูเข้าหอคอย Infinity Tower",
+            zone = "Towers",
+            pos = Vector3.new(80.98, 44.5, 80.54)
+        },
+        {
+            id = "DiceShop",
+            name = "🎲 Dice Shop (ร้านลูกเต๋า)",
+            sub = "NPC ซื้อลูกเต๋าเพิ่ม Luck / ตัวคูณ",
+            zone = "DiceShop",
+            pos = Vector3.new(37.98, 22.5, 35.54)
+        },
+        {
+            id = "Shop",
+            name = "🛒 Shop (ร้านค้าทั่วไป)",
+            sub = "ร้านค้าไอเทมและอุปกรณ์",
+            zone = "Shop",
+            pos = Vector3.new(19.98, 22.5, 22.12)
+        },
+        {
+            id = "Fuse",
+            name = "⚔️ Aura Fuse Machine (หลอมยูนิต)",
+            sub = "แท่นหลอมรวมออร่ายูนิต",
+            zone = "Fusing",
+            pos = Vector3.new(37.98, 22.5, 35.54)
+        },
+        {
+            id = "Grades",
+            name = "✨ Grade Reroll (สุ่มเกรด)",
+            sub = "แท่นสุ่มเกรดยูนิต (D - SSS / ∞)",
+            zone = "Grades",
+            pos = Vector3.new(21.98, 22.5, 34.12)
+        },
+        {
+            id = "Traits",
+            name = "🧬 Trait Reroll (สุ่มเทรต)",
+            sub = "แท่นสุ่มคุณสมบัติพิเศษ (Paradox)",
+            zone = "Traits",
+            pos = Vector3.new(39.98, 22.5, 23.12)
+        },
+        {
+            id = "Selling",
+            name = "💰 Selling Zone (ขายยูนิต)",
+            sub = "โซนขายยูนิตแลกเงิน",
+            zone = "Selling",
+            pos = Vector3.new(23.98, 22.5, 18.12)
+        },
+        {
+            id = "Quests",
+            name = "📜 Quests Board (เควส)",
+            sub = "บอร์ดรับเควสประจำวัน",
+            zone = "Quests",
+            pos = Vector3.new(28.98, 22.5, 37.12)
+        },
+        {
+            id = "Trade",
+            name = "🤝 Trade Zone (เทรด)",
+            sub = "โซนแลกเปลี่ยนยูนิตระหว่างผู้เล่น",
+            zone = "Trade",
+            pos = Vector3.new(24.98, 22.5, 37.12)
+        },
+        {
+            id = "Podium",
+            name = "🏆 Best Roll (แท่นโชว์ดวง)",
+            sub = "ตู้สุ่มและแท่นโชว์ดวงดีกลางแมพ",
+            pos = Vector3.new(0, 5, 0)
+        }
+    }
+
+    local function resolveTeleportPos(loc)
+        if loc.getPos then
+            local p = loc.getPos()
+            if p then return p end
+        end
+        if loc.zone and workspace:FindFirstChild("Zones") then
+            local z = workspace.Zones:FindFirstChild(loc.zone)
+            if z and z:IsA("BasePart") then
+                return z.Position + Vector3.new(0, 3.5, 0)
+            end
+        end
+        return loc.pos
+    end
+
+    function UtilityFeatures.teleportTo(loc)
+        local char = LP.Character
+        if not char then
+            notify("Teleport", "ไม่พบตัวละครของคุณ", 2)
+            return false
+        end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            notify("Teleport", "ไม่พบ HumanoidRootPart", 2)
+            return false
+        end
+        local targetPos = resolveTeleportPos(loc)
+        if not targetPos then
+            notify("Teleport", "ไม่พบพิกัดเป้าหมาย", 2)
+            return false
+        end
+        hrp.CFrame = CFrame.new(targetPos)
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        notify("Teleport", "วาร์ปไป: " .. loc.name .. " ✓", 2)
+        return true
     end
 end
 
@@ -1912,16 +2450,46 @@ pcall(function()
     if existing then existing:Destroy() end
 end)
 
-local targetParent = LP:WaitForChild("PlayerGui")
+local function buildHubUI()
+local targetParent = nil
 pcall(function()
     if gethui then
-        targetParent = gethui()
+        local h = gethui()
+        local test = Instance.new("Folder")
+        test.Parent = h
+        test:Destroy()
+        targetParent = h
     end
 end)
+if not targetParent then
+    pcall(function()
+        local cg = game:GetService("CoreGui")
+        local test = Instance.new("Folder")
+        test.Parent = cg
+        test:Destroy()
+        targetParent = cg
+    end)
+end
+if not targetParent then
+    targetParent = LP:WaitForChild("PlayerGui", 10) or LP:FindFirstChildOfClass("PlayerGui") or LP:FindFirstChild("PlayerGui")
+end
 
 gui=Instance.new("ScreenGui")
-gui.Name="540CHEATS_v24"; gui.ResetOnSpawn=false; gui.IgnoreGuiInset=true
-gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; gui.Parent=targetParent
+gui.Name="540CHEATS_v24"
+gui.ResetOnSpawn=false
+gui.IgnoreGuiInset=true
+gui.DisplayOrder=999999
+gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+gui.Enabled=true
+
+local parentOk = pcall(function()
+    gui.Parent = targetParent
+end)
+if not parentOk or not gui.Parent then
+    pcall(function()
+        gui.Parent = LP:WaitForChild("PlayerGui", 5) or LP:FindFirstChild("PlayerGui")
+    end)
+end
 
 notif=Instance.new("TextLabel",gui)
 notif.Size=UDim2.new(0,300,0,32); notif.Position=UDim2.new(0.5,-150,0,-40)
@@ -1947,181 +2515,546 @@ showNotif = function(text)
 end
 
 main=Instance.new("Frame")
-main.Size=UDim2.new(0,640,0,500); main.Position=UDim2.new(0.5,-320,0.5,-250)
-main.BackgroundColor3=DARK.bg; main.BorderSizePixel=0; main.Active=true; main.Parent=gui
-Instance.new("UICorner",main).CornerRadius=UDim.new(0,12)
-Instance.new("UIStroke",main).Color=DARK.border
+main.Size=UDim2.new(0,780,0,480)
+main.Position=UDim2.new(0.5,0,0.5,0)
+main.AnchorPoint=Vector2.new(0.5,0.5)
+main.BackgroundColor3=DARK.bg; main.BorderSizePixel=0; main.Active=true; main.Parent=gui; main.Visible=false
 
-local HH=54
+-- ── 540 HUB Ultra-Premium Loading Screen ──────────────────────────────────
+local loadOverlay = Instance.new("Frame", gui)
+loadOverlay.Size = UDim2.new(1, 0, 1, 0)
+loadOverlay.Position = UDim2.new(0, 0, 0, 0)
+loadOverlay.BackgroundColor3 = Color3.fromRGB(8, 6, 15)
+loadOverlay.BackgroundTransparency = 0.3
+loadOverlay.BorderSizePixel = 0
+loadOverlay.ZIndex = 500
+
+-- Ambient glow backdrop
+local glowBack = Instance.new("Frame", loadOverlay)
+glowBack.Size = UDim2.new(0, 420, 0, 230)
+glowBack.Position = UDim2.new(0.5, 0, 0.5, 0)
+glowBack.AnchorPoint = Vector2.new(0.5, 0.5)
+glowBack.BackgroundColor3 = Color3.fromRGB(140, 40, 240)
+glowBack.BackgroundTransparency = 0.8
+glowBack.BorderSizePixel = 0
+glowBack.ZIndex = 501
+Instance.new("UICorner", glowBack).CornerRadius = UDim.new(0, 20)
+
+-- Main Loading Card
+local loadCard = Instance.new("Frame", loadOverlay)
+loadCard.Size = UDim2.new(0, 400, 0, 215)
+loadCard.Position = UDim2.new(0.5, 0, 0.5, 0)
+loadCard.AnchorPoint = Vector2.new(0.5, 0.5)
+loadCard.BackgroundColor3 = Color3.fromRGB(16, 12, 26)
+loadCard.BorderSizePixel = 0
+loadCard.ZIndex = 502
+Instance.new("UICorner", loadCard).CornerRadius = UDim.new(0, 16)
+
+local cardGrad = Instance.new("UIGradient", loadCard)
+cardGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 16, 38)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 9, 20))
+})
+cardGrad.Rotation = 45
+
+local lcStroke = Instance.new("UIStroke", loadCard)
+lcStroke.Color = Color3.fromRGB(160, 70, 255)
+lcStroke.Thickness = 1.8
+
+-- Outer Logo Glow Ring
+local iconBadge = Instance.new("Frame", loadCard)
+iconBadge.Size = UDim2.new(0, 56, 0, 56)
+iconBadge.Position = UDim2.new(0.5, -28, 0, 16)
+iconBadge.BackgroundColor3 = Color3.fromRGB(45, 18, 75)
+iconBadge.BorderSizePixel = 0
+iconBadge.ZIndex = 503
+Instance.new("UICorner", iconBadge).CornerRadius = UDim.new(0, 14)
+local badgeStroke = Instance.new("UIStroke", iconBadge)
+badgeStroke.Color = Color3.fromRGB(190, 90, 255)
+badgeStroke.Thickness = 1.5
+
+local lcIcon = Instance.new("ImageLabel", iconBadge)
+lcIcon.Size = UDim2.new(0, 42, 0, 42); lcIcon.Position = UDim2.new(0.5, -21, 0.5, -21)
+lcIcon.BackgroundTransparency = 1; lcIcon.Image = "rbxthumb://type=Asset&id=86571453491468&w=420&h=420"
+lcIcon.ScaleType = Enum.ScaleType.Fit; lcIcon.ZIndex = 504
+Instance.new("UICorner", lcIcon).CornerRadius = UDim.new(0, 10)
+
+local lcTitle = Instance.new("TextLabel", loadCard)
+lcTitle.Size = UDim2.new(1, -20, 0, 22); lcTitle.Position = UDim2.new(0, 10, 0, 80)
+lcTitle.BackgroundTransparency = 1; lcTitle.Text = "540 HUB"
+lcTitle.TextColor3 = Color3.fromRGB(255, 255, 255); lcTitle.Font = FONT_BOLD; lcTitle.TextSize = 20
+lcTitle.ZIndex = 503
+
+local lcSub = Instance.new("TextLabel", loadCard)
+lcSub.Size = UDim2.new(1, -20, 0, 14); lcSub.Position = UDim2.new(0, 10, 0, 104)
+lcSub.BackgroundTransparency = 1; lcSub.Text = "ANIME DICE EDITION • BY REKTZ"
+lcSub.TextColor3 = Color3.fromRGB(190, 160, 255); lcSub.Font = FONT_BOLD; lcSub.TextSize = 11
+lcSub.ZIndex = 503
+
+-- Status Text & Percentage Row
+local statRow = Instance.new("Frame", loadCard)
+statRow.Size = UDim2.new(1, -44, 0, 16); statRow.Position = UDim2.new(0, 22, 0, 134)
+statRow.BackgroundTransparency = 1; statRow.ZIndex = 503
+
+local statLbl = Instance.new("TextLabel", statRow)
+statLbl.Size = UDim2.new(1, -60, 1, 0); statLbl.Position = UDim2.new(0, 0, 0, 0)
+statLbl.BackgroundTransparency = 1; statLbl.Text = "Initializing script core..."
+statLbl.TextColor3 = Color3.fromRGB(215, 205, 240); statLbl.Font = FONT_MEDIUM; statLbl.TextSize = 12
+statLbl.TextXAlignment = Enum.TextXAlignment.Left; statLbl.ZIndex = 503
+
+local pctLbl = Instance.new("TextLabel", statRow)
+pctLbl.Size = UDim2.new(0, 55, 1, 0); pctLbl.Position = UDim2.new(1, -55, 0, 0)
+pctLbl.BackgroundTransparency = 1; pctLbl.Text = "0%"
+pctLbl.TextColor3 = Color3.fromRGB(220, 120, 255); pctLbl.Font = FONT_BOLD; pctLbl.TextSize = 13
+pctLbl.TextXAlignment = Enum.TextXAlignment.Right; pctLbl.ZIndex = 503
+
+-- Progress Bar Track
+local progBg = Instance.new("Frame", loadCard)
+progBg.Size = UDim2.new(1, -44, 0, 8); progBg.Position = UDim2.new(0, 22, 0, 158)
+progBg.BackgroundColor3 = Color3.fromRGB(28, 20, 46); progBg.BorderSizePixel = 0
+progBg.ZIndex = 503
+Instance.new("UICorner", progBg).CornerRadius = UDim.new(0, 4)
+
+local progFill = Instance.new("Frame", progBg)
+progFill.Size = UDim2.new(0, 0, 1, 0); progFill.BackgroundColor3 = Color3.fromRGB(180, 60, 255)
+progFill.BorderSizePixel = 0; progFill.ZIndex = 504
+Instance.new("UICorner", progFill).CornerRadius = UDim.new(0, 4)
+
+local fillGrad = Instance.new("UIGradient", progFill)
+fillGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(130, 40, 240)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(235, 90, 255))
+})
+
+-- Execution Sequence:
+-- Fill to 100%, wait 2 seconds after full, then reveal main GUI
+task.spawn(function()
+    local function setProgress(pct, duration, statusText)
+        statLbl.Text = statusText
+        TweenService:Create(progFill, TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(pct / 100, 0, 1, 0) }):Play()
+        local startVal = tonumber(pctLbl.Text:match("%d+")) or 0
+        local steps = 15
+        for i = 1, steps do
+            local cur = math.floor(startVal + (pct - startVal) * (i / steps))
+            pctLbl.Text = tostring(cur) .. "%"
+            task.wait(duration / steps)
+        end
+        pctLbl.Text = tostring(pct) .. "%"
+    end
+
+    task.wait(0.2)
+    setProgress(30, 0.45, "Loading modules & game hooks...")
+    setProgress(65, 0.55, "Scanning plot objects & remote events...")
+    setProgress(90, 0.45, "Applying configurations & theme...")
+    setProgress(100, 0.35, "100% • System Ready!")
+
+    -- ให้มันโหลดเสร็จเต็มหลอดก่อน หลังจากนั้น 2 วิ ค่อยขึ้น gui สคริปมา
+    task.wait(2.0)
+
+    -- Smooth fade out
+    local fadeInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    TweenService:Create(loadOverlay, fadeInfo, { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(glowBack, fadeInfo, { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(loadCard, fadeInfo, { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(lcStroke, fadeInfo, { Transparency = 1 }):Play()
+    TweenService:Create(iconBadge, fadeInfo, { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(badgeStroke, fadeInfo, { Transparency = 1 }):Play()
+    TweenService:Create(lcIcon, fadeInfo, { ImageTransparency = 1 }):Play()
+    TweenService:Create(lcTitle, fadeInfo, { TextTransparency = 1 }):Play()
+    TweenService:Create(lcSub, fadeInfo, { TextTransparency = 1 }):Play()
+    TweenService:Create(statLbl, fadeInfo, { TextTransparency = 1 }):Play()
+    TweenService:Create(pctLbl, fadeInfo, { TextTransparency = 1 }):Play()
+    TweenService:Create(progBg, fadeInfo, { BackgroundTransparency = 1 }):Play()
+    TweenService:Create(progFill, fadeInfo, { BackgroundTransparency = 1 }):Play()
+    task.wait(0.4)
+    loadOverlay:Destroy()
+    main.Visible = true
+    if wm then wm.Visible = true end
+end)
+Instance.new("UICorner",main).CornerRadius=UDim.new(0,14)
+local mainStroke=Instance.new("UIStroke",main); mainStroke.Color=DARK.border; mainStroke.Thickness=1.2
+
+-- Responsive Universal Resolution Scaling (Auto-adapts to Mobile, Tablet, 1080p, 1440p, 4K)
+local uiScale = Instance.new("UIScale", main)
+local function updateResolutionScale()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local vp = cam.ViewportSize
+    if vp.X == 0 or vp.Y == 0 then return end
+    local targetScale = 1.0
+    if vp.Y >= 1440 then
+        targetScale = 1.35
+    elseif vp.Y >= 1080 then
+        targetScale = 1.15
+    elseif vp.Y < 600 or vp.X < 900 then
+        targetScale = math.clamp(math.min(vp.X / 860, vp.Y / 530), 0.6, 0.95)
+    else
+        targetScale = 1.0
+    end
+    uiScale.Scale = targetScale
+end
+updateResolutionScale()
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateResolutionScale)
+end
+
+local HH=50
 do
 local header=Instance.new("Frame",main)
 header.Size=UDim2.new(1,0,0,HH); header.BackgroundColor3=DARK.header; header.BorderSizePixel=0
-Instance.new("UICorner",header).CornerRadius=UDim.new(0,12)
+Instance.new("UICorner",header).CornerRadius=UDim.new(0,14)
 local hBot=Instance.new("Frame",header)
-hBot.Size=UDim2.new(1,0,0,12); hBot.Position=UDim2.new(0,0,1,-12)
+hBot.Size=UDim2.new(1,0,0,14); hBot.Position=UDim2.new(0,0,1,-14)
 hBot.BackgroundColor3=DARK.header; hBot.BorderSizePixel=0
-local aL=Instance.new("Frame",header)
-aL.Size=UDim2.new(1,-24,0,1); aL.Position=UDim2.new(0,12,1,-1)
-aL.BackgroundColor3=DARK.hAccent; aL.BorderSizePixel=0; aL.BackgroundTransparency=0.5
 
 local dragging,dragStart,startPos
 header.InputBegan:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 then
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
         dragging=true; dragStart=i.Position; startPos=main.Position end end)
 UIS.InputChanged:Connect(function(i)
-    if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then
-        local d=i.Position-dragStart
+    if dragging and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+        local curScale = (uiScale and uiScale.Scale > 0) and uiScale.Scale or 1
+        local d=(i.Position-dragStart) / curScale
         main.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y)
     end end)
 UIS.InputEnded:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end end)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
 
+-- 540 HUB Logo Icon
 local logoBg=Instance.new("Frame",header)
-logoBg.Size=UDim2.new(0,34,0,34); logoBg.Position=UDim2.new(0,14,0,10)
-logoBg.BackgroundColor3=Color3.fromRGB(25,25,35); logoBg.BorderSizePixel=0
+logoBg.Size=UDim2.new(0,32,0,32); logoBg.Position=UDim2.new(0,14,0.5,-16)
+logoBg.BackgroundColor3=Color3.fromRGB(32,20,50); logoBg.BorderSizePixel=0
 Instance.new("UICorner",logoBg).CornerRadius=UDim.new(0,8)
-Instance.new("UIStroke",logoBg).Color=DARK.hAccent
+local lStroke=Instance.new("UIStroke",logoBg); lStroke.Color=DARK.hAccent; lStroke.Thickness=1.2
+
 local hIcon=Instance.new("ImageLabel",logoBg)
-hIcon.Size=UDim2.new(0,26,0,26); hIcon.Position=UDim2.new(0.5,-13,0.5,-13)
+hIcon.Size=UDim2.new(0,24,0,24); hIcon.Position=UDim2.new(0.5,-12,0.5,-12)
 hIcon.BackgroundTransparency=1; hIcon.Image="rbxthumb://type=Asset&id=86571453491468&w=420&h=420"; hIcon.ScaleType=Enum.ScaleType.Fit
 
+-- Title: 540 HUB
 local hT=Instance.new("TextLabel",header)
-hT.Size=UDim2.new(0,200,0,18); hT.Position=UDim2.new(0,58,0,10)
-hT.BackgroundTransparency=1; hT.Text="CHEAT HUB"
+hT.Size=UDim2.new(0,160,0,18); hT.Position=UDim2.new(0,54,0,9)
+hT.BackgroundTransparency=1; hT.Text="540 HUB"
 hT.TextColor3=Color3.new(1,1,1); hT.TextXAlignment=Enum.TextXAlignment.Left
-hT.Font=FONT; hT.TextSize=14
-local hS=Instance.new("TextLabel",header)
-hS.Size=UDim2.new(0,200,0,14); hS.Position=UDim2.new(0,58,0,29)
-hS.BackgroundTransparency=1; hS.Text="discord.gg/540shop"
-hS.TextColor3=DARK.subtext; hS.TextXAlignment=Enum.TextXAlignment.Left
-hS.Font=FONT; hS.TextSize=10
+hT.Font=FONT_BOLD; hT.TextSize=16
 
+-- Subtitle: Anime Dice • by .valen_vct
+local hS=Instance.new("TextLabel",header)
+hS.Size=UDim2.new(0,240,0,16); hS.Position=UDim2.new(0,54,0,26)
+hS.BackgroundTransparency=1; hS.Text="Anime Dice • 540 HUB Edition"
+hS.TextColor3=DARK.subtext; hS.TextXAlignment=Enum.TextXAlignment.Left
+hS.Font=FONT_MEDIUM; hS.TextSize=12
+
+-- Window Controls (Minimize, Expand, Close)
 local bCont=Instance.new("Frame",header)
-bCont.Size=UDim2.new(0,68,0,30); bCont.Position=UDim2.new(1,-80,0,12); bCont.BackgroundTransparency=1
+bCont.Size=UDim2.new(0,96,0,28); bCont.Position=UDim2.new(1,-104,0.5,-14); bCont.BackgroundTransparency=1
+
+-- Minimize Button
 local minBtn=Instance.new("TextButton",bCont)
-minBtn.Size=UDim2.new(0,30,1,0); minBtn.BackgroundColor3=Color3.fromRGB(28,38,55)
-minBtn.BorderSizePixel=0; minBtn.Text="—"; minBtn.TextColor3=Color3.fromRGB(200,210,230)
-minBtn.Font=FONT; minBtn.TextSize=16
+minBtn.Size=UDim2.new(0,28,1,0); minBtn.Position=UDim2.new(0,0,0,0)
+minBtn.BackgroundColor3=Color3.fromRGB(24,18,34); minBtn.BorderSizePixel=0
+minBtn.Text="—"; minBtn.TextColor3=Color3.fromRGB(180,170,200); minBtn.Font=FONT_BOLD; minBtn.TextSize=13
 Instance.new("UICorner",minBtn).CornerRadius=UDim.new(0,6)
-minBtn.MouseEnter:Connect(function() TweenService:Create(minBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(0,120,200),TextColor3=Color3.new(1,1,1)}):Play() end)
-minBtn.MouseLeave:Connect(function() TweenService:Create(minBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(28,38,55),TextColor3=Color3.fromRGB(200,210,230)}):Play() end)
 minBtn.MouseButton1Click:Connect(function() main.Visible=false; minimizedLogo.Visible=true end)
+
+-- Maximize / Fullscreen Icon Button
+local maxBtn=Instance.new("TextButton",bCont)
+maxBtn.Size=UDim2.new(0,28,1,0); maxBtn.Position=UDim2.new(0,34,0,0)
+maxBtn.BackgroundColor3=Color3.fromRGB(24,18,34); maxBtn.BorderSizePixel=0
+maxBtn.Text="⛶"; maxBtn.TextColor3=Color3.fromRGB(180,170,200); maxBtn.Font=FONT; maxBtn.TextSize=12
+Instance.new("UICorner",maxBtn).CornerRadius=UDim.new(0,6)
+
+-- Close Button
 local closeBtn=Instance.new("TextButton",bCont)
-closeBtn.Size=UDim2.new(0,30,1,0); closeBtn.Position=UDim2.new(0,38,0,0)
-closeBtn.BackgroundColor3=Color3.fromRGB(55,28,34); closeBtn.BorderSizePixel=0
-closeBtn.Text="×"; closeBtn.TextColor3=Color3.fromRGB(230,180,190)
-closeBtn.Font=FONT; closeBtn.TextSize=18
+closeBtn.Size=UDim2.new(0,28,1,0); closeBtn.Position=UDim2.new(0,68,0,0)
+closeBtn.BackgroundColor3=Color3.fromRGB(36,16,32); closeBtn.BorderSizePixel=0
+closeBtn.Text="×"; closeBtn.TextColor3=DARK.red; closeBtn.Font=FONT_BOLD; closeBtn.TextSize=16
 Instance.new("UICorner",closeBtn).CornerRadius=UDim.new(0,6)
-closeBtn.MouseEnter:Connect(function() TweenService:Create(closeBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(200,50,60),TextColor3=Color3.new(1,1,1)}):Play() end)
-closeBtn.MouseLeave:Connect(function() TweenService:Create(closeBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(55,28,34),TextColor3=Color3.fromRGB(230,180,190)}):Play() end)
 closeBtn.MouseButton1Click:Connect(function()
     for k, _ in pairs(CFG) do CFG[k]=false end
     stopTowerQueue()
-    pcall(function() gui:Destroy() end) end)
+    pcall(function() gui:Destroy() end)
+end)
 end
 
 local sidebar=Instance.new("Frame",main)
-sidebar.Size=UDim2.new(0,160,1,-HH); sidebar.Position=UDim2.new(0,0,0,HH)
+sidebar.Size=UDim2.new(0,195,1,-HH); sidebar.Position=UDim2.new(0,0,0,HH)
 sidebar.BackgroundColor3=DARK.sidebar; sidebar.BorderSizePixel=0
 
+-- Search Bar in Sidebar (540 HUB Style)
+local searchCont=Instance.new("Frame",sidebar)
+searchCont.Size=UDim2.new(1,-20,0,34); searchCont.Position=UDim2.new(0,10,0,10)
+searchCont.BackgroundColor3=DARK.searchBg; searchCont.BorderSizePixel=0
+Instance.new("UICorner",searchCont).CornerRadius=UDim.new(0,8)
+local scStroke=Instance.new("UIStroke",searchCont); scStroke.Color=DARK.border; scStroke.Thickness=1
+
+local sIcon=Instance.new("TextLabel",searchCont)
+sIcon.Size=UDim2.new(0,24,1,0); sIcon.Position=UDim2.new(0,6,0,0)
+sIcon.BackgroundTransparency=1; sIcon.Text="🔍"; sIcon.TextColor3=DARK.accent; sIcon.TextSize=12
+sIcon.Font=FONT
+
+local searchInput=Instance.new("TextBox",searchCont)
+searchInput.Size=UDim2.new(1,-34,1,0); searchInput.Position=UDim2.new(0,30,0,0)
+searchInput.BackgroundTransparency=1; searchInput.PlaceholderText="Search"
+searchInput.PlaceholderColor3=DARK.subtext; searchInput.Text=""
+searchInput.TextColor3=Color3.new(1,1,1); searchInput.Font=FONT_MEDIUM; searchInput.TextSize=12
+searchInput.TextXAlignment=Enum.TextXAlignment.Left; searchInput.ClearTextOnFocus=false
+
 local tabs={}; local pages={}
-local tabCont=Instance.new("Frame",sidebar)
-tabCont.Size=UDim2.new(1,0,1,-90); tabCont.BackgroundTransparency=1
-Instance.new("UIListLayout",tabCont).Padding=UDim.new(0,2)
+local tabCont=Instance.new("ScrollingFrame",sidebar)
+tabCont.Size=UDim2.new(1,0,1,-130); tabCont.Position=UDim2.new(0,0,0,50)
+tabCont.BackgroundTransparency=1; tabCont.BorderSizePixel=0; tabCont.ScrollBarThickness=2
+tabCont.ScrollBarImageColor3=DARK.accent; tabCont.CanvasSize=UDim2.new(0,0,0,0)
+tabCont.AutomaticCanvasSize=Enum.AutomaticSize.Y
+Instance.new("UIListLayout",tabCont).Padding=UDim.new(0,3)
 local tp=Instance.new("UIPadding",tabCont)
-tp.PaddingTop=UDim.new(0,12); tp.PaddingLeft=UDim.new(0,10); tp.PaddingRight=UDim.new(0,10)
+tp.PaddingTop=UDim.new(0,4); tp.PaddingLeft=UDim.new(0,10); tp.PaddingRight=UDim.new(0,10)
+
+-- Header Banner Generator for Pages (540 HUB style purple banner)
+local function createPageBanner(parent, tabName)
+    local banner=Instance.new("Frame",parent)
+    banner.Size=UDim2.new(1,0,0,56); banner.BackgroundColor3=DARK.banner; banner.BorderSizePixel=0
+    Instance.new("UICorner",banner).CornerRadius=UDim.new(0,10)
+
+    local bGrad=Instance.new("UIGradient",banner)
+    bGrad.Color=ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(170, 35, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 10, 215))
+    })
+
+    local bIconBg=Instance.new("Frame",banner)
+    bIconBg.Size=UDim2.new(0,38,0,38); bIconBg.Position=UDim2.new(0,10,0.5,-19)
+    bIconBg.BackgroundColor3=Color3.fromRGB(50, 15, 80); bIconBg.BackgroundTransparency=0.3; bIconBg.BorderSizePixel=0
+    Instance.new("UICorner",bIconBg).CornerRadius=UDim.new(0,8)
+
+    local bLogo=Instance.new("ImageLabel",bIconBg)
+    bLogo.Size=UDim2.new(0,28,0,28); bLogo.Position=UDim2.new(0.5,-14,0.5,-14)
+    bLogo.BackgroundTransparency=1; bLogo.Image="rbxthumb://type=Asset&id=86571453491468&w=420&h=420"
+    bLogo.ScaleType=Enum.ScaleType.Fit
+
+    local bTitle=Instance.new("TextLabel",banner)
+    bTitle.Size=UDim2.new(1,-240,0,18); bTitle.Position=UDim2.new(0,58,0,10)
+    bTitle.BackgroundTransparency=1; bTitle.Text="540HUB BY REKTZ"
+    bTitle.TextColor3=Color3.new(1,1,1); bTitle.TextXAlignment=Enum.TextXAlignment.Left
+    bTitle.Font=FONT_BOLD; bTitle.TextSize=15
+
+    local bSub=Instance.new("TextLabel",banner)
+    bSub.Size=UDim2.new(1,-240,0,16); bSub.Position=UDim2.new(0,58,0,30)
+    bSub.BackgroundTransparency=1; bSub.Text="สคริปต์ Anime Dice ของ 540 HUB (" .. tostring(tabName) .. ")"
+    bSub.TextColor3=Color3.fromRGB(240,225,255); bSub.TextXAlignment=Enum.TextXAlignment.Left
+    bSub.Font=FONT_MEDIUM; bSub.TextSize=12
+
+    -- Server Controls (Rejoin & Hop Server)
+    local actRow=Instance.new("Frame", banner)
+    actRow.Size=UDim2.new(0, 160, 0, 30); actRow.Position=UDim2.new(1, -168, 0.5, -15)
+    actRow.BackgroundTransparency=1
+    local arL=Instance.new("UIListLayout", actRow)
+    arL.FillDirection=Enum.FillDirection.Horizontal; arL.Padding=UDim.new(0, 6)
+
+    local rjBtn=Instance.new("TextButton", actRow)
+    rjBtn.Size=UDim2.new(0, 75, 1, 0); rjBtn.BackgroundColor3=Color3.fromRGB(38, 12, 70); rjBtn.BorderSizePixel=0
+    rjBtn.Text="🔄 Rejoin"; rjBtn.TextColor3=Color3.fromRGB(245, 235, 255); rjBtn.Font=FONT_BOLD; rjBtn.TextSize=11
+    Instance.new("UICorner", rjBtn).CornerRadius=UDim.new(0, 6)
+    local rjStroke=Instance.new("UIStroke", rjBtn); rjStroke.Color=Color3.fromRGB(180, 90, 255); rjStroke.Thickness=1
+
+    local hopBtn=Instance.new("TextButton", actRow)
+    hopBtn.Size=UDim2.new(0, 78, 1, 0); hopBtn.BackgroundColor3=Color3.fromRGB(38, 12, 70); hopBtn.BorderSizePixel=0
+    hopBtn.Text="🌐 Hop Server"; hopBtn.TextColor3=Color3.fromRGB(245, 235, 255); hopBtn.Font=FONT_BOLD; hopBtn.TextSize=11
+    Instance.new("UICorner", hopBtn).CornerRadius=UDim.new(0, 6)
+    local hopStroke=Instance.new("UIStroke", hopBtn); hopStroke.Color=Color3.fromRGB(180, 90, 255); hopStroke.Thickness=1
+
+    rjBtn.MouseButton1Click:Connect(function()
+        showNotif("กำลังเชื่อมต่อเข้าเซิฟเวอร์เดิม...")
+        task.wait(0.3)
+        pcall(function()
+            if #Players:GetPlayers() <= 1 then
+                TeleportService:Teleport(game.PlaceId, LP)
+            else
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
+            end
+        end)
+    end)
+
+    hopBtn.MouseButton1Click:Connect(function()
+        showNotif("กำลังค้นหาเซิฟเวอร์ใหม่...")
+        task.spawn(function()
+            local placeId = game.PlaceId
+            local serversUrl = "https://games.roblox.com/v1/games/" .. tostring(placeId) .. "/servers/Public?sortOrder=Desc&limit=100"
+            local httpReq = getHttpRequestFunc()
+            if not httpReq then
+                TeleportService:Teleport(placeId, LP)
+                return
+            end
+            local ok, res = pcall(function()
+                return httpReq({ Url = serversUrl, Method = "GET" })
+            end)
+            if ok and res and res.Body then
+                local decodeOk, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+                if decodeOk and data and data.data then
+                    local serverList = {}
+                    for _, s in ipairs(data.data) do
+                        if type(s) == "table" and s.id and s.id ~= game.JobId and s.playing and s.maxPlayers and s.playing < s.maxPlayers then
+                            table.insert(serverList, s.id)
+                        end
+                    end
+                    if #serverList > 0 then
+                        local targetServer = serverList[math.random(1, #serverList)]
+                        showNotif("พบเซิฟเวอร์! กำลังวาป...")
+                        TeleportService:TeleportToPlaceInstance(placeId, targetServer, LP)
+                        return
+                    end
+                end
+            end
+            showNotif("ไม่พบเซิฟเวอร์ว่าง วาปแบบสุ่มแทน...")
+            TeleportService:Teleport(placeId, LP)
+        end)
+    end)
+
+    return banner
+end
 
 local function createTab(name,icon)
     local btn=Instance.new("TextButton",tabCont)
-    btn.Size=UDim2.new(1,0,0,34); btn.BackgroundColor3=DARK.item
+    btn.Size=UDim2.new(1,0,0,38); btn.BackgroundColor3=DARK.itemSel
     btn.BackgroundTransparency=1; btn.BorderSizePixel=0; btn.Text=""
     Instance.new("UICorner",btn).CornerRadius=UDim.new(0,8)
+
     local ico=Instance.new("TextLabel",btn)
-    ico.Size=UDim2.new(0,22,0,34); ico.Position=UDim2.new(0,8,0,0)
+    ico.Size=UDim2.new(0,24,1,0); ico.Position=UDim2.new(0,10,0,0)
     ico.BackgroundTransparency=1; ico.Text=icon; ico.TextColor3=DARK.subtext
-    ico.TextXAlignment=Enum.TextXAlignment.Left; ico.Font=FONT; ico.TextSize=14
+    ico.TextXAlignment=Enum.TextXAlignment.Left; ico.Font=FONT; ico.TextSize=15
+
     local lbl=Instance.new("TextLabel",btn)
-    lbl.Size=UDim2.new(1,-36,1,0); lbl.Position=UDim2.new(0,36,0,0)
+    lbl.Size=UDim2.new(1,-42,1,0); lbl.Position=UDim2.new(0,38,0,0)
     lbl.BackgroundTransparency=1; lbl.Text=name; lbl.TextColor3=DARK.subtext
-    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.Font=FONT; lbl.TextSize=12
+    lbl.TextXAlignment=Enum.TextXAlignment.Left; lbl.Font=FONT_BOLD; lbl.TextSize=13
+
     local page=Instance.new("ScrollingFrame",main)
-    page.Size=UDim2.new(1,-180,1,-HH-20); page.Position=UDim2.new(0,170,0,HH+10)
+    page.Size=UDim2.new(1,-215,1,-HH-18); page.Position=UDim2.new(0,205,0,HH+9)
     page.BackgroundTransparency=1; page.BorderSizePixel=0
-    page.ScrollBarThickness=4; page.ScrollBarImageColor3=DARK.accent
+    page.ScrollBarThickness=3; page.ScrollBarImageColor3=DARK.accent
     page.CanvasSize=UDim2.new(0,0,0,0); page.AutomaticCanvasSize=Enum.AutomaticSize.Y; page.Visible=false
     Instance.new("UIListLayout",page).Padding=UDim.new(0,8)
-    local pp=Instance.new("UIPadding",page); pp.PaddingTop=UDim.new(0,5); pp.PaddingRight=UDim.new(0,8)
-    tabs[name]=btn; pages[name]=page
+    local pp=Instance.new("UIPadding",page); pp.PaddingTop=UDim.new(0,4); pp.PaddingRight=UDim.new(0,8)
+
+    -- Auto-insert 540 HUB Banner at top of page
+    createPageBanner(page, name)
+
+    tabs[name]={btn=btn, lbl=lbl, ico=ico}
+    pages[name]=page
+
     btn.MouseButton1Click:Connect(function()
         for n,t in pairs(tabs) do
-            t.BackgroundTransparency=1; pages[n].Visible=false
-            t:FindFirstChild("TextLabel").TextColor3=DARK.subtext end
-        btn.BackgroundTransparency=0; btn.BackgroundColor3=DARK.item
-        page.Visible=true; lbl.TextColor3=Color3.new(1,1,1); ico.TextColor3=DARK.accent end)
+            t.btn.BackgroundTransparency=1
+            pages[n].Visible=false
+            t.lbl.TextColor3=DARK.subtext
+            t.ico.TextColor3=DARK.subtext
+        end
+        btn.BackgroundTransparency=0
+        btn.BackgroundColor3=DARK.itemSel
+        page.Visible=true
+        lbl.TextColor3=Color3.new(1,1,1)
+        ico.TextColor3=DARK.accent
+    end)
 end
 
-createTab("Main","🏠"); createTab("Roll","🎲"); createTab("Skill","⚡")
-createTab("Tower","🏰"); createTab("Webhook","📡"); createTab("Utility","⚙️"); createTab("Misc","💾"); createTab("Settings","🛠️")
-tabs["Main"].BackgroundTransparency=0; tabs["Main"].BackgroundColor3=DARK.item
-pages["Main"].Visible=true
-tabs["Main"]:FindFirstChild("TextLabel").TextColor3=Color3.new(1,1,1)
+-- Search functionality
+searchInput:GetPropertyChangedSignal("Text"):Connect(function()
+    local q = searchInput.Text:lower():gsub("%s+", "")
+    for n, t in pairs(tabs) do
+        if q == "" or n:lower():find(q) then
+            t.btn.Visible = true
+        else
+            t.btn.Visible = false
+        end
+    end
+end)
 
+createTab("Main","🏠"); createTab("Roll","🎲"); createTab("Skill","⚡")
+createTab("Tower","🏰"); createTab("Potion","🧪"); createTab("Quest & Rebirth","📜")
+createTab("Teleport","🗺️"); createTab("Utility","⚙️"); createTab("Misc","💾"); createTab("Settings","🛠️")
+
+tabs["Main"].btn.BackgroundTransparency=0
+tabs["Main"].btn.BackgroundColor3=DARK.itemSel
+pages["Main"].Visible=true
+tabs["Main"].lbl.TextColor3=Color3.new(1,1,1)
+tabs["Main"].ico.TextColor3=DARK.accent
+-- main.Visible will be enabled by Loading Screen after 100% + 2s delay
+gui.Enabled=true
+
+-- User Profile in Sidebar Footer (540 HUB style)
 do
 local uPanel=Instance.new("Frame",sidebar)
-uPanel.Size=UDim2.new(1,-20,0,60); uPanel.Position=UDim2.new(0,10,1,-70)
-uPanel.BackgroundColor3=DARK.item; uPanel.BorderSizePixel=0
+uPanel.Size=UDim2.new(1,-16,0,54); uPanel.Position=UDim2.new(0,8,1,-62)
+uPanel.BackgroundColor3=DARK.card; uPanel.BorderSizePixel=0
 Instance.new("UICorner",uPanel).CornerRadius=UDim.new(0,8)
-Instance.new("UIStroke",uPanel).Color=DARK.border
+local upStroke=Instance.new("UIStroke",uPanel); upStroke.Color=DARK.border; upStroke.Thickness=1
+
 local uAv=Instance.new("ImageLabel",uPanel)
-uAv.Size=UDim2.new(0,40,0,40); uAv.Position=UDim2.new(0,10,0.5,-20)
-uAv.BackgroundColor3=Color3.fromRGB(30,30,40); uAv.BorderSizePixel=0
+uAv.Size=UDim2.new(0,36,0,36); uAv.Position=UDim2.new(0,8,0.5,-18)
+uAv.BackgroundColor3=Color3.fromRGB(30,22,42); uAv.BorderSizePixel=0
 Instance.new("UICorner",uAv).CornerRadius=UDim.new(1,0)
-Instance.new("UIStroke",uAv).Color=DARK.accent
+local avStroke=Instance.new("UIStroke",uAv); avStroke.Color=DARK.accent; avStroke.Thickness=1
+
 local uNm=Instance.new("TextLabel",uPanel)
-uNm.Size=UDim2.new(1,-60,0,16); uNm.Position=UDim2.new(0,58,0,10)
-uNm.BackgroundTransparency=1; uNm.Text=LP.Name; uNm.TextColor3=Color3.new(1,1,1)
-uNm.TextXAlignment=Enum.TextXAlignment.Left; uNm.Font=FONT; uNm.TextSize=11; uNm.TextTruncate=Enum.TextTruncate.AtEnd
+uNm.Size=UDim2.new(1,-54,0,16); uNm.Position=UDim2.new(0,50,0,10)
+uNm.BackgroundTransparency=1; uNm.Text=LP.DisplayName or LP.Name
+uNm.TextColor3=Color3.new(1,1,1); uNm.TextXAlignment=Enum.TextXAlignment.Left
+uNm.Font=FONT_BOLD; uNm.TextSize=13; uNm.TextTruncate=Enum.TextTruncate.AtEnd
+
 local uId=Instance.new("TextLabel",uPanel)
-uId.Size=UDim2.new(1,-60,0,14); uId.Position=UDim2.new(0,58,0,28)
-uId.BackgroundTransparency=1; uId.Text="ID: "..LP.UserId
-uId.TextColor3=DARK.subtext; uId.TextXAlignment=Enum.TextXAlignment.Left; uId.Font=FONT; uId.TextSize=10
+uId.Size=UDim2.new(1,-54,0,16); uId.Position=UDim2.new(0,50,0,28)
+uId.BackgroundTransparency=1; uId.Text="@"..LP.Name
+uId.TextColor3=DARK.subtext; uId.TextXAlignment=Enum.TextXAlignment.Left
+uId.Font=FONT_MEDIUM; uId.TextSize=11; uId.TextTruncate=Enum.TextTruncate.AtEnd
+
 task.spawn(function()
     local ok,t=pcall(function()
         return Players:GetUserThumbnailAsync(LP.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size100x100) end)
-    if ok and t then uAv.Image=t end end)
+    if ok and t then uAv.Image=t end
+end)
 end
 
+-- Component Builders (540 HUB Signature Components)
 local function makeToggle(parent,label,sublabel,initial,cb)
-    local h=sublabel and 52 or 36
+    local h=sublabel and 60 or 46
     local c=Instance.new("Frame",parent)
     c.Size=UDim2.new(1,0,0,h); c.BackgroundColor3=DARK.item; c.BorderSizePixel=0
     Instance.new("UICorner",c).CornerRadius=UDim.new(0,8)
+    local cStroke=Instance.new("UIStroke",c); cStroke.Color=DARK.border; cStroke.Thickness=1
+
     local l=Instance.new("TextLabel",c)
-    l.Size=UDim2.new(1,-60,0,18); l.Position=UDim2.new(0,14,0,sublabel and 7 or 9)
+    l.Size=UDim2.new(1,-70,0,22); l.Position=UDim2.new(0,14,0,sublabel and 8 or 12)
     l.BackgroundTransparency=1; l.Text=label; l.TextColor3=DARK.text
-    l.TextXAlignment=Enum.TextXAlignment.Left; l.Font=FONT; l.TextSize=12
+    l.TextXAlignment=Enum.TextXAlignment.Left; l.Font=FONT_BOLD; l.TextSize=14
+
     if sublabel then
         local s=Instance.new("TextLabel",c)
-        s.Size=UDim2.new(1,-60,0,14); s.Position=UDim2.new(0,14,0,28)
+        s.Size=UDim2.new(1,-70,0,18); s.Position=UDim2.new(0,14,0,32)
         s.BackgroundTransparency=1; s.Text=sublabel; s.TextColor3=DARK.subtext
-        s.TextXAlignment=Enum.TextXAlignment.Left; s.Font=FONT; s.TextSize=10
+        s.TextXAlignment=Enum.TextXAlignment.Left; s.Font=FONT_MEDIUM; s.TextSize=11
     end
+
+    -- 540 HUB Toggle Switch Capsule
     local sw=Instance.new("Frame",c)
-    sw.Size=UDim2.new(0,38,0,20); sw.Position=UDim2.new(1,-50,0.5,-10)
+    sw.Size=UDim2.new(0,42,0,22); sw.Position=UDim2.new(1,-54,0.5,-11)
     sw.BackgroundColor3=initial and DARK.tOn or DARK.tOff; sw.BorderSizePixel=0
     Instance.new("UICorner",sw).CornerRadius=UDim.new(1,0)
+
     local k=Instance.new("Frame",sw)
-    k.Size=UDim2.new(0,14,0,14)
-    k.Position=initial and UDim2.new(1,-16,0.5,-7) or UDim2.new(0,3,0.5,-7)
+    k.Size=UDim2.new(0,16,0,16)
+    k.Position=initial and UDim2.new(1,-19,0.5,-8) or UDim2.new(0,3,0.5,-8)
     k.BackgroundColor3=Color3.new(1,1,1); k.BorderSizePixel=0
     Instance.new("UICorner",k).CornerRadius=UDim.new(1,0)
+
     local st=initial
     local function setVisual(val)
         st = (val == true)
         sw.BackgroundColor3 = st and DARK.tOn or DARK.tOff
-        TweenService:Create(k,TweenInfo.new(0.15),{
-            Position=st and UDim2.new(1,-16,0.5,-7) or UDim2.new(0,3,0.5,-7)}):Play()
+        TweenService:Create(k,TweenInfo.new(0.18, Enum.EasingStyle.Quad),{
+            Position=st and UDim2.new(1,-19,0.5,-8) or UDim2.new(0,3,0.5,-8)}):Play()
     end
+
     local btn=Instance.new("TextButton",c)
     btn.Size=UDim2.new(1,0,1,0); btn.BackgroundTransparency=1; btn.Text=""
     btn.MouseButton1Click:Connect(function()
@@ -2143,37 +3076,40 @@ local function makeCfgToggle(parent,cfgKey,label,sublabel,extraCb)
 end
 
 local function makeButton(parent,label,sublabel,btnText,cb)
-    local h=sublabel and 52 or 36
+    local h=sublabel and 60 or 46
     local c=Instance.new("Frame",parent)
     c.Size=UDim2.new(1,0,0,h); c.BackgroundColor3=DARK.item; c.BorderSizePixel=0
     Instance.new("UICorner",c).CornerRadius=UDim.new(0,8)
+    local cStroke=Instance.new("UIStroke",c); cStroke.Color=DARK.border; cStroke.Thickness=1
+
     local l=Instance.new("TextLabel",c)
-    l.Size=UDim2.new(1,-105,0,18); l.Position=UDim2.new(0,14,0,sublabel and 7 or 9)
+    l.Size=UDim2.new(1,-130,0,22); l.Position=UDim2.new(0,14,0,sublabel and 8 or 12)
     l.BackgroundTransparency=1; l.Text=label; l.TextColor3=DARK.text
-    l.TextXAlignment=Enum.TextXAlignment.Left; l.Font=FONT; l.TextSize=12
+    l.TextXAlignment=Enum.TextXAlignment.Left; l.Font=FONT_BOLD; l.TextSize=14
+
     if sublabel then
         local s=Instance.new("TextLabel",c)
-        s.Size=UDim2.new(1,-105,0,14); s.Position=UDim2.new(0,14,0,28)
+        s.Size=UDim2.new(1,-130,0,18); s.Position=UDim2.new(0,14,0,32)
         s.BackgroundTransparency=1; s.Text=sublabel; s.TextColor3=DARK.subtext
-        s.TextXAlignment=Enum.TextXAlignment.Left; s.Font=FONT; s.TextSize=10
+        s.TextXAlignment=Enum.TextXAlignment.Left; s.Font=FONT_MEDIUM; s.TextSize=11
     end
 
     local actionBtn=Instance.new("TextButton",c)
-    actionBtn.Size=UDim2.new(0,75,0,28); actionBtn.Position=UDim2.new(1,-87,0.5,-14)
-    actionBtn.BackgroundColor3=Color3.fromRGB(32,24,48); actionBtn.BorderSizePixel=0
-    actionBtn.Text=btnText or "Collect"; actionBtn.TextColor3=Color3.fromRGB(240,230,255)
-    actionBtn.Font=FONT; actionBtn.TextSize=11
+    actionBtn.Size=UDim2.new(0,102,0,32); actionBtn.Position=UDim2.new(1,-114,0.5,-16)
+    actionBtn.BackgroundColor3=Color3.fromRGB(42,26,62); actionBtn.BorderSizePixel=0
+    actionBtn.Text=btnText or "Click 🪄"; actionBtn.TextColor3=Color3.fromRGB(255,150,245)
+    actionBtn.Font=FONT_BOLD; actionBtn.TextSize=12
     Instance.new("UICorner",actionBtn).CornerRadius=UDim.new(0,6)
     local stroke=Instance.new("UIStroke",actionBtn)
-    stroke.Color=DARK.purple; stroke.Thickness=1.2
+    stroke.Color=DARK.accent; stroke.Thickness=1
 
     local busy=false
     actionBtn.MouseButton1Click:Connect(function()
         if busy then return end
         busy=true
-        TweenService:Create(actionBtn,TweenInfo.new(0.08),{BackgroundColor3=DARK.purple,TextColor3=Color3.new(1,1,1)}):Play()
+        TweenService:Create(actionBtn,TweenInfo.new(0.08),{BackgroundColor3=DARK.accent,TextColor3=Color3.new(1,1,1)}):Play()
         task.wait(0.1)
-        TweenService:Create(actionBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(32,24,48),TextColor3=Color3.fromRGB(240,230,255)}):Play()
+        TweenService:Create(actionBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(36,24,54),TextColor3=Color3.fromRGB(255,140,240)}):Play()
         pcall(cb)
         task.wait(0.2)
         busy=false
@@ -2182,29 +3118,33 @@ local function makeButton(parent,label,sublabel,btnText,cb)
 end
 
 local function makeInput(parent,label,sublabel,defaultVal,cb)
-    local h=sublabel and 52 or 36
+    local h=sublabel and 60 or 46
     local c=Instance.new("Frame",parent)
     c.Size=UDim2.new(1,0,0,h); c.BackgroundColor3=DARK.item; c.BorderSizePixel=0
     Instance.new("UICorner",c).CornerRadius=UDim.new(0,8)
+    local cStroke=Instance.new("UIStroke",c); cStroke.Color=DARK.border; cStroke.Thickness=1
+
     local l=Instance.new("TextLabel",c)
-    l.Size=UDim2.new(1,-105,0,18); l.Position=UDim2.new(0,14,0,sublabel and 7 or 9)
+    l.Size=UDim2.new(1,-130,0,22); l.Position=UDim2.new(0,14,0,sublabel and 8 or 12)
     l.BackgroundTransparency=1; l.Text=label; l.TextColor3=DARK.text
-    l.TextXAlignment=Enum.TextXAlignment.Left; l.Font=FONT; l.TextSize=12
+    l.TextXAlignment=Enum.TextXAlignment.Left; l.Font=FONT_BOLD; l.TextSize=14
+
     if sublabel then
         local s=Instance.new("TextLabel",c)
-        s.Size=UDim2.new(1,-105,0,14); s.Position=UDim2.new(0,14,0,28)
+        s.Size=UDim2.new(1,-130,0,18); s.Position=UDim2.new(0,14,0,32)
         s.BackgroundTransparency=1; s.Text=sublabel; s.TextColor3=DARK.subtext
-        s.TextXAlignment=Enum.TextXAlignment.Left; s.Font=FONT; s.TextSize=10
+        s.TextXAlignment=Enum.TextXAlignment.Left; s.Font=FONT_MEDIUM; s.TextSize=11
     end
 
     local tb=Instance.new("TextBox",c)
-    tb.Size=UDim2.new(0,75,0,28); tb.Position=UDim2.new(1,-87,0.5,-14)
-    tb.BackgroundColor3=Color3.fromRGB(32,24,48); tb.BorderSizePixel=0
-    tb.Text=tostring(defaultVal or ""); tb.TextColor3=Color3.fromRGB(240,230,255)
-    tb.Font=FONT; tb.TextSize=11; tb.ClearTextOnFocus=false
+    tb.Size=UDim2.new(0,88,0,28); tb.Position=UDim2.new(1,-98,0.5,-14)
+    tb.BackgroundColor3=DARK.inputBg; tb.BorderSizePixel=0
+    tb.Text=tostring(defaultVal or ""); tb.TextColor3=Color3.fromRGB(245,240,255)
+    tb.Font=FONT_BOLD; tb.TextSize=12; tb.ClearTextOnFocus=false
+    tb.TextXAlignment=Enum.TextXAlignment.Center
     Instance.new("UICorner",tb).CornerRadius=UDim.new(0,6)
     local stroke=Instance.new("UIStroke",tb)
-    stroke.Color=DARK.purple; stroke.Thickness=1.2
+    stroke.Color=DARK.border; stroke.Thickness=1
 
     tb.FocusLost:Connect(function()
         local num = tonumber(tb.Text)
@@ -2219,30 +3159,32 @@ local function makeInput(parent,label,sublabel,defaultVal,cb)
 end
 
 local function makeSelector(parent,label,sublabel,options,defaultIdx,cb)
-    local h=sublabel and 52 or 36
+    local h=sublabel and 60 or 46
     local c=Instance.new("Frame",parent)
     c.Size=UDim2.new(1,0,0,h); c.BackgroundColor3=DARK.item; c.BorderSizePixel=0
     Instance.new("UICorner",c).CornerRadius=UDim.new(0,8)
+    local cStroke=Instance.new("UIStroke",c); cStroke.Color=DARK.border; cStroke.Thickness=1
+
     local l=Instance.new("TextLabel",c)
-    l.Size=UDim2.new(1,-170,0,18); l.Position=UDim2.new(0,14,0,sublabel and 7 or 9)
+    l.Size=UDim2.new(1,-185,0,22); l.Position=UDim2.new(0,14,0,sublabel and 8 or 12)
     l.BackgroundTransparency=1; l.Text=label; l.TextColor3=DARK.text
-    l.TextXAlignment=Enum.TextXAlignment.Left; l.Font=FONT; l.TextSize=12
+    l.TextXAlignment=Enum.TextXAlignment.Left; l.Font=FONT_BOLD; l.TextSize=14
     local s=nil
     if sublabel then
         local sLbl=Instance.new("TextLabel",c)
-        sLbl.Size=UDim2.new(1,-170,0,14); sLbl.Position=UDim2.new(0,14,0,28)
+        sLbl.Size=UDim2.new(1,-185,0,18); sLbl.Position=UDim2.new(0,14,0,32)
         sLbl.BackgroundTransparency=1; sLbl.Text=sublabel; sLbl.TextColor3=DARK.subtext
-        sLbl.TextXAlignment=Enum.TextXAlignment.Left; sLbl.Font=FONT; sLbl.TextSize=10
+        sLbl.TextXAlignment=Enum.TextXAlignment.Left; sLbl.Font=FONT_MEDIUM; sLbl.TextSize=11
         s = sLbl
     end
 
     local selBtn=Instance.new("TextButton",c)
-    selBtn.Size=UDim2.new(0,145,0,28); selBtn.Position=UDim2.new(1,-155,0.5,-14)
-    selBtn.BackgroundColor3=Color3.fromRGB(32,24,48); selBtn.BorderSizePixel=0
-    selBtn.Font=FONT; selBtn.TextSize=11; selBtn.TextColor3=Color3.fromRGB(240,230,255)
+    selBtn.Size=UDim2.new(0,155,0,32); selBtn.Position=UDim2.new(1,-165,0.5,-16)
+    selBtn.BackgroundColor3=DARK.inputBg; selBtn.BorderSizePixel=0
+    selBtn.Font=FONT_BOLD; selBtn.TextSize=12; selBtn.TextColor3=Color3.fromRGB(245,240,255)
     Instance.new("UICorner",selBtn).CornerRadius=UDim.new(0,6)
     local stroke=Instance.new("UIStroke",selBtn)
-    stroke.Color=DARK.purple; stroke.Thickness=1.2
+    stroke.Color=DARK.border; stroke.Thickness=1
 
     local curIdx = defaultIdx or 1
     local function updateDisplay()
@@ -2309,12 +3251,13 @@ makeButton(pages["Main"],"Equip Best Now","กดเพื่อจัดยู�
         showNotif("สวมใส่ยูนิตที่ทำเงินสูงสุดเรียบร้อย ✓")
     end
 end)
-makeCfgToggle(pages["Main"],"AutoClaimRewards","Auto Claim Free Rewards","รับของรางวัลฟรีทั้งหมดอัตโนมัติ (Daily Login, Group Chest, และ Offline Cash)")
-makeButton(pages["Main"],"Claim Free Rewards Now","กดรับ Daily Login, Group Chest, และ Offline Cash ทันที 1 ครั้ง","Claim All",function()
-    claimAllFreeRewards(true)
-end)
+-- [TEMPORARILY HIDDEN FROM MAIN TAB]
+-- makeCfgToggle(pages["Main"],"AutoClaimRewards","Auto Claim Free Rewards","รับของรางวัลฟรีทั้งหมดอัตโนมัติ (Daily Login, Group Chest, และ Offline Cash)")
+-- makeButton(pages["Main"],"Claim Free Rewards Now","กดรับ Daily Login, Group Chest, และ Offline Cash ทันที 1 ครั้ง","Claim All",function()
+--     claimAllFreeRewards(true)
+-- end)
 end
-setupMainTab()
+pcall(setupMainTab)
 
 -- ── Roll tab ──────────────────────────────────────────────────────────────────
 local function setupRollTab()
@@ -2328,230 +3271,15 @@ local _, srd = makeSelector(pages["Roll"],"Roll Delay","ปรับความ
 }, 1, function(val) CFG.RollDelay = val end)
 setRollDelay = srd
 makeCfgToggle(pages["Roll"],"SkipCutscene","Skip Roll Cutscene (Fast)","ข้ามฉากคัตซีนแรร์ ไม่ล็อกมุมกล้อง ไม่เสียเวลาคัตซีน")
-makeCfgToggle(pages["Roll"],"AutoRoll","Normal Auto Roll","ทอยลูกเต๋าแบบปกติ (ดีเลย์ 2.6 วินาที)")
+-- [TEMPORARILY HIDDEN FROM ROLL TAB]
+-- makeCfgToggle(pages["Roll"],"AutoRoll","Normal Auto Roll","ทอยลูกเต๋าแบบปกติ (ดีเลย์ 2.6 วินาที)")
 makeCfgToggle(pages["Roll"],"AutoBuyDice","Auto Buy Best Dice","ซื้อลูกเต๋าที่มีค่าโชคสูงสุดอัตโนมัติ")
-makeCfgToggle(pages["Roll"],"AutoEquipDice","Auto Equip Best Dice","สวมใส่ลูกเต๋าที่ดีที่สุดอัตโนมัติ")
-makeCfgToggle(pages["Roll"],"AutoRebirth","Auto Rebirth","รีเบิร์ธอัตโนมัติเมื่อเงินถึงเกณฑ์ที่กำหนด")
-makeCfgToggle(pages["Roll"],"AutoUseLuck","Auto Use Luck Potions","กดใช้น้ำยาโชคอัตโนมัติเมื่อเวลาบัฟหมด")
-makeCfgToggle(pages["Roll"],"AutoLuckOnEvent","Auto Luck on Luck Event","เมื่อ Luck Event เซิร์ฟเวอร์เริ่ม จะกดใช้น้ำยาโชคทุกชนิด (Tier สูงสุด) ทันทีอย่างละ 1 ครั้ง", function(val)
-    if val then
-        task.spawn(checkEventAutoLuck)
-    end
-end)
-
-local weatherCard = Instance.new("Frame", pages["Roll"])
-weatherCard.Size = UDim2.new(1, 0, 0, 78)
-weatherCard.BackgroundColor3 = DARK.item; weatherCard.BorderSizePixel = 0
-Instance.new("UICorner", weatherCard).CornerRadius = UDim.new(0, 8)
-local wStroke = Instance.new("UIStroke", weatherCard)
-wStroke.Color = DARK.border; wStroke.Thickness = 1.2
-
-local wIcon = Instance.new("TextLabel", weatherCard)
-wIcon.Size = UDim2.new(0, 32, 0, 32); wIcon.Position = UDim2.new(0, 10, 0, 10)
-wIcon.BackgroundTransparency = 1; wIcon.Text = "🌦️"; wIcon.TextSize = 22
-wIcon.Font = FONT
-
-local wTitle = Instance.new("TextLabel", weatherCard)
-wTitle.Size = UDim2.new(1, -55, 0, 16); wTitle.Position = UDim2.new(0, 48, 0, 8)
-wTitle.BackgroundTransparency = 1; wTitle.Text = "Server Weather & Event Status"
-wTitle.TextColor3 = DARK.text; wTitle.TextXAlignment = Enum.TextXAlignment.Left
-wTitle.Font = FONT; wTitle.TextSize = 11
-
-local wStatus = Instance.new("TextLabel", weatherCard)
-wStatus.Size = UDim2.new(1, -55, 0, 18); wStatus.Position = UDim2.new(0, 48, 0, 26)
-wStatus.BackgroundTransparency = 1; wStatus.Text = "Normal Weather (ไม่มีอีเวนต์)"
-wStatus.TextColor3 = DARK.subtext; wStatus.TextXAlignment = Enum.TextXAlignment.Left
-wStatus.Font = FONT; wStatus.TextSize = 12
-
-local wSub = Instance.new("TextLabel", weatherCard)
-wSub.Size = UDim2.new(1, -55, 0, 14); wSub.Position = UDim2.new(0, 48, 0, 48)
-wSub.BackgroundTransparency = 1; wSub.Text = "รอสภาพอากาศพิเศษ (Luck 2.5x / Cash 2.5x / Speed 2x)"
-wSub.TextColor3 = DARK.subtext; wSub.TextXAlignment = Enum.TextXAlignment.Left
-wSub.Font = FONT; wSub.TextSize = 9
-
-weatherUIElements = { icon = wIcon, status = wStatus, sub = wSub }
-task.spawn(updateWeatherUI)
-
-makeCfgToggle(pages["Roll"],"WeatherNotifyScreen","Weather Screen Notification","แสดงข้อความแจ้งเตือนกลางหน้าจอเกมเมื่อเกิดสภาพอากาศพิเศษ")
-
-local luckDropCard=Instance.new("Frame",pages["Roll"])
-luckDropCard.Size=UDim2.new(1,0,0,96); luckDropCard.BackgroundColor3=DARK.item; luckDropCard.BorderSizePixel=0
-Instance.new("UICorner",luckDropCard).CornerRadius=UDim.new(0,8)
-
-local lTitle=Instance.new("TextLabel",luckDropCard)
-lTitle.Size=UDim2.new(1,-170,0,18); lTitle.Position=UDim2.new(0,14,0,7)
-lTitle.BackgroundTransparency=1; lTitle.Text="🧪 Luck Potions Manager (19 Items)"
-lTitle.TextColor3=DARK.text; lTitle.TextXAlignment=Enum.TextXAlignment.Left; lTitle.Font=FONT; lTitle.TextSize=12
-
-local lSub=Instance.new("TextLabel",luckDropCard)
-lSub.Size=UDim2.new(1,-170,0,14); lSub.Position=UDim2.new(0,14,0,26)
-lSub.BackgroundTransparency=1; lSub.Text="เลือกหมวดหมู่น้ำยาโชคที่ต้องการใช้งาน"
-lSub.TextColor3=DARK.subtext; lSub.TextXAlignment=Enum.TextXAlignment.Left; lSub.Font=FONT; lSub.TextSize=10
-
-local lStatusLbl=Instance.new("TextLabel",luckDropCard)
-lStatusLbl.Size=UDim2.new(1,-170,0,20); lStatusLbl.Position=UDim2.new(0,14,0,48)
-lStatusLbl.BackgroundTransparency=1; lStatusLbl.Text="Active: ตรวจสอบสถานะ..."
-lStatusLbl.TextColor3=Color3.fromRGB(80,255,160); lStatusLbl.TextXAlignment=Enum.TextXAlignment.Left; lStatusLbl.Font=FONT; lStatusLbl.TextSize=10
-
-local lEventLbl=Instance.new("TextLabel",luckDropCard)
-lEventLbl.Size=UDim2.new(1,-28,0,18); lEventLbl.Position=UDim2.new(0,14,0,70)
-lEventLbl.BackgroundTransparency=1; lEventLbl.Text="🌟 Server Event: ติดตามสถานะอีเวนต์..."
-lEventLbl.TextColor3=DARK.hAccent; lEventLbl.TextXAlignment=Enum.TextXAlignment.Left; lEventLbl.Font=FONT; lEventLbl.TextSize=10
-
-luckDropBtn=Instance.new("TextButton",luckDropCard)
-luckDropBtn.Size=UDim2.new(0,145,0,28); luckDropBtn.Position=UDim2.new(1,-155,0,8)
-luckDropBtn.BackgroundColor3=Color3.fromRGB(32,24,48); luckDropBtn.BorderSizePixel=0
-luckDropBtn.Text="All Potions (6/6)  ▾"; luckDropBtn.TextColor3=Color3.fromRGB(240,230,255)
-luckDropBtn.Font=FONT; luckDropBtn.TextSize=11
-Instance.new("UICorner",luckDropBtn).CornerRadius=UDim.new(0,6)
-local luckDropBtnStroke=Instance.new("UIStroke",luckDropBtn)
-luckDropBtnStroke.Color=DARK.purple; luckDropBtnStroke.Thickness=1.2
-
-local useNowBtn=Instance.new("TextButton",luckDropCard)
-useNowBtn.Size=UDim2.new(0,145,0,24); useNowBtn.Position=UDim2.new(1,-155,0,44)
-useNowBtn.BackgroundColor3=Color3.fromRGB(40,30,55); useNowBtn.BorderSizePixel=0
-useNowBtn.Text="⚡ Use Best Now"; useNowBtn.TextColor3=Color3.fromRGB(255,215,80)
-useNowBtn.Font=FONT; useNowBtn.TextSize=10
-Instance.new("UICorner",useNowBtn).CornerRadius=UDim.new(0,6)
-local unbStroke=Instance.new("UIStroke",useNowBtn); unbStroke.Color=DARK.border
-
-useNowBtn.MouseButton1Click:Connect(function()
-    useBestLuckNow()
-end)
-
-local LUCK_ITEM_H = 34
-local LUCK_PADDING = 2
-local totalLuckHeight = #LUCK_CATEGORIES * (LUCK_ITEM_H + LUCK_PADDING) + 10
-
-luckDropMenu=Instance.new("ScrollingFrame",main)
-luckDropMenu.Size=UDim2.new(0,225,0,math.min(220, totalLuckHeight))
-luckDropMenu.BackgroundColor3=DARK.dropdown
-luckDropMenu.BorderSizePixel=0; luckDropMenu.ScrollBarThickness=4
-luckDropMenu.ScrollBarImageColor3=DARK.purple; luckDropMenu.Visible=false; luckDropMenu.ZIndex=100
-luckDropMenu.CanvasSize=UDim2.new(0, 0, 0, totalLuckHeight)
-luckDropMenu.AutomaticCanvasSize=Enum.AutomaticSize.None
-Instance.new("UICorner",luckDropMenu).CornerRadius=UDim.new(0,8)
-local ldmStroke=Instance.new("UIStroke",luckDropMenu); ldmStroke.Color=DARK.border; ldmStroke.Thickness=1.5
-local ldList=Instance.new("UIListLayout",luckDropMenu); ldList.Padding=UDim.new(0,LUCK_PADDING)
-local ldPad=Instance.new("UIPadding",luckDropMenu)
-ldPad.PaddingTop=UDim.new(0,5); ldPad.PaddingBottom=UDim.new(0,5)
-ldPad.PaddingLeft=UDim.new(0,5); ldPad.PaddingRight=UDim.new(0,5)
-
-updateLuckDropBtnText = function()
-    local count=0
-    for _,sel in pairs(SelectedLuckCategories) do if sel then count=count+1 end end
-    if count==0 then
-        luckDropBtn.Text="All Potions (0/6)  ▾"
-        luckDropBtn.TextColor3=Color3.fromRGB(240,230,255)
-    elseif count==#LUCK_CATEGORIES then
-        luckDropBtn.Text="All Potions (6/6)  ▾"
-        luckDropBtn.TextColor3=DARK.hAccent
-    else
-        luckDropBtn.Text=string.format("Selected (%d/%d)  ▾", count, #LUCK_CATEGORIES)
-        luckDropBtn.TextColor3=DARK.hAccent
-    end
-end
-updateLuckDropBtnText()
-
-local function toggleLuckDropdown()
-    if luckDropMenu.Visible then
-        luckDropMenu.Visible=false
-    else
-        if dropMenu then dropMenu.Visible=false end
-        if skillDropMenu then skillDropMenu.Visible=false end
-        local absPos=luckDropBtn.AbsolutePosition
-        local mainPos=main.AbsolutePosition
-        luckDropMenu.Position=UDim2.new(0, absPos.X-mainPos.X-75, 0, absPos.Y-mainPos.Y+32)
-        luckDropMenu.Visible=true
-    end
-end
-luckDropBtn.MouseButton1Click:Connect(toggleLuckDropdown)
-
-refreshLuckOpts = {}
-for _, cat in ipairs(LUCK_CATEGORIES) do
-    local opt=Instance.new("TextButton",luckDropMenu)
-    opt.Size=UDim2.new(1,0,0,LUCK_ITEM_H); opt.BackgroundColor3=DARK.item; opt.BackgroundTransparency=1
-    opt.BorderSizePixel=0; opt.Text=""; opt.ZIndex=101
-    Instance.new("UICorner",opt).CornerRadius=UDim.new(0,6)
-
-    local chk=Instance.new("TextLabel",opt)
-    chk.Size=UDim2.new(0,18,1,0); chk.Position=UDim2.new(0,6,0,0)
-    chk.BackgroundTransparency=1; chk.Text="○"; chk.TextColor3=DARK.subtext
-    chk.Font=FONT; chk.TextSize=12; chk.ZIndex=102
-
-    local oName=Instance.new("TextLabel",opt)
-    oName.Size=UDim2.new(1,-28,0,16); oName.Position=UDim2.new(0,26,0,2)
-    oName.BackgroundTransparency=1; oName.Text=cat.name; oName.TextColor3=DARK.text
-    oName.TextXAlignment=Enum.TextXAlignment.Left; oName.Font=FONT; oName.TextSize=11; oName.ZIndex=102
-
-    local oSub=Instance.new("TextLabel",opt)
-    oSub.Size=UDim2.new(1,-28,0,14); oSub.Position=UDim2.new(0,26,0,18)
-    oSub.BackgroundTransparency=1; oSub.Text=cat.sub; oSub.TextColor3=DARK.subtext
-    oSub.TextXAlignment=Enum.TextXAlignment.Left; oSub.Font=FONT; oSub.TextSize=9; oSub.ZIndex=102
-
-    local function refreshOpt()
-        local isSel=SelectedLuckCategories[cat.id]==true
-        chk.Text=isSel and "●" or "○"
-        chk.TextColor3=isSel and DARK.hAccent or DARK.subtext
-        oName.TextColor3=isSel and Color3.new(1,1,1) or DARK.text
-        opt.BackgroundTransparency=isSel and 0 or 1
-        opt.BackgroundColor3=isSel and DARK.itemSel or DARK.item
-    end
-    refreshOpt()
-    table.insert(refreshLuckOpts, refreshOpt)
-
-    opt.MouseButton1Click:Connect(function()
-        SelectedLuckCategories[cat.id]=not SelectedLuckCategories[cat.id]
-        refreshOpt()
-        updateLuckDropBtnText()
-    end)
-end
-
-task.spawn(function()
-    while true do
-        task.wait(1.5)
-        pcall(function()
-            local activeMap = getActiveLuckInfo()
-            local activeParts = {}
-            for _, cat in ipairs(LUCK_CATEGORIES) do
-                local cur = activeMap[cat.id]
-                if cur and cur.remaining > 0 then
-                    table.insert(activeParts, cur.name .. " (" .. cur.remaining .. "s)")
-                end
-            end
-            if #activeParts > 0 then
-                lStatusLbl.Text = "Active: " .. table.concat(activeParts, ", ")
-                lStatusLbl.TextColor3 = Color3.fromRGB(80,255,160)
-            else
-                lStatusLbl.Text = "Active: ไม่มีน้ำยาทำงานอยู่ (Idle)"
-                lStatusLbl.TextColor3 = DARK.subtext
-            end
-
-            local counts, total = getLuckPotionsInInventory()
-            lSub.Text = "มีน้ำยาในกระเป๋า: " .. total .. " ชิ้น (เลือกเปิด/ปิดตามหมวด)"
-
-            if currentServerWeather and currentServerWeather.name then
-                local now = workspace:GetServerTimeNow()
-                local started = currentServerWeather.startedAt or now
-                local dur = currentServerWeather.duration or 300
-                local rem = math.max(0, math.floor(dur - (now - started)))
-                lEventLbl.Text = "🌟 Server Event: " .. tostring(currentServerWeather.name) .. " (เหลือ " .. rem .. "s)"
-                lEventLbl.TextColor3 = Color3.fromRGB(255,215,80)
-            else
-                lEventLbl.Text = "🌟 Server Event: ไม่มีอีเวนต์ในเซิร์ฟเวอร์ขณะนี้ (Idle)"
-                lEventLbl.TextColor3 = DARK.subtext
-            end
-
-            if CFG.AutoLuckOnEvent then
-                checkEventAutoLuck()
-            end
-        end)
-    end
-end)
+-- [TEMPORARILY HIDDEN FROM ROLL TAB]
+-- makeCfgToggle(pages["Roll"],"AutoEquipDice","Auto Equip Best Dice","สวมใส่ลูกเต๋าที่ดีที่สุดอัตโนมัติ")
 
 
 end
-setupRollTab()
+pcall(setupRollTab)
 
 -- ── Skill tab ─────────────────────────────────────────────────────────────────
 local function setupSkillTab()
@@ -2564,18 +3292,18 @@ Instance.new("UICorner",skillDropCard).CornerRadius=UDim.new(0,8)
 local sTitle=Instance.new("TextLabel",skillDropCard)
 sTitle.Size=UDim2.new(1,-170,0,18); sTitle.Position=UDim2.new(0,14,0,7)
 sTitle.BackgroundTransparency=1; sTitle.Text="Select Skill Branches"
-sTitle.TextColor3=DARK.text; sTitle.TextXAlignment=Enum.TextXAlignment.Left; sTitle.Font=FONT; sTitle.TextSize=12
+sTitle.TextColor3=DARK.text; sTitle.TextXAlignment=Enum.TextXAlignment.Left; sTitle.Font=FONT_BOLD; sTitle.TextSize=14
 
 local sSub=Instance.new("TextLabel",skillDropCard)
 sSub.Size=UDim2.new(1,-170,0,14); sSub.Position=UDim2.new(0,14,0,28)
 sSub.BackgroundTransparency=1; sSub.Text="เลือกสายสกิลที่ต้องการให้อัปเกรด (เลือกได้หลายสาย)"
-sSub.TextColor3=DARK.subtext; sSub.TextXAlignment=Enum.TextXAlignment.Left; sSub.Font=FONT; sSub.TextSize=10
+sSub.TextColor3=DARK.subtext; sSub.TextXAlignment=Enum.TextXAlignment.Left; sSub.Font=FONT_MEDIUM; sSub.TextSize=11
 
 skillDropBtn=Instance.new("TextButton",skillDropCard)
-skillDropBtn.Size=UDim2.new(0,145,0,28); skillDropBtn.Position=UDim2.new(1,-155,0.5,-14)
-skillDropBtn.BackgroundColor3=Color3.fromRGB(32,24,48); skillDropBtn.BorderSizePixel=0
-skillDropBtn.Text="Select Branches  ▾"; skillDropBtn.TextColor3=Color3.fromRGB(240,230,255)
-skillDropBtn.Font=FONT; skillDropBtn.TextSize=11
+skillDropBtn.Size=UDim2.new(0,155,0,30); skillDropBtn.Position=UDim2.new(1,-165,0.5,-15)
+skillDropBtn.BackgroundColor3=Color3.fromRGB(34,25,52); skillDropBtn.BorderSizePixel=0
+skillDropBtn.Text="Select Branches  ▾"; skillDropBtn.TextColor3=Color3.fromRGB(245,235,255)
+skillDropBtn.Font=FONT_BOLD; skillDropBtn.TextSize=12
 Instance.new("UICorner",skillDropBtn).CornerRadius=UDim.new(0,6)
 local skillDropBtnStroke=Instance.new("UIStroke",skillDropBtn)
 skillDropBtnStroke.Color=DARK.purple; skillDropBtnStroke.Thickness=1.2
@@ -2661,10 +3389,209 @@ end
 updateSkillDropBtnText()
 
 end
-setupSkillTab()
+pcall(setupSkillTab)
 
 -- ── Tower tab ─────────────────────────────────────────────────────────────────
 local function setupTowerTab()
+
+-- ── Potion tab (Luck / Cash / Damage Multi-Category Engine) ─────────────────────
+local function setupPotionTab()
+    local curPotionType = CFG.PotionType or "Luck"
+
+    local pTitle, pSub, pStatusLbl
+    local updateCategoryDropdown
+
+    -- 1. Selector for Potion Category Type (Luck / Cash / Damage)
+    makeSelector(pages["Potion"], "Select Potion Type", "เลือกหมวดหมู่น้ำยาที่ต้องการใช้งาน (Luck / Cash / Damage)", {
+        { text = "🍀 Luck Potions",   value = "Luck",   sub = "เน้นเพิ่มค่าโชคในการทอย (Luck I-IV + 5 สายพิเศษ)" },
+        { text = "💰 Cash Potions",   value = "Cash",   sub = "เน้นเพิ่มตัวคูณเงินจาก Plot (Income I-IV + 5 สายพิเศษ)" },
+        { text = "⚔️ Damage Potions", value = "Damage", sub = "เน้นเพิ่มพลังโจมตีหอคอย (Damage I-IV + 5 สายพิเศษ)" },
+    }, (curPotionType == "Cash" and 2) or (curPotionType == "Damage" and 3) or 1, function(val)
+        CFG.PotionType = val
+        curPotionType = val
+        if updateCategoryDropdown then updateCategoryDropdown() end
+    end)
+
+    -- 2. Card for Branches Selection & Active Status
+    local potionDropCard = Instance.new("Frame", pages["Potion"])
+    potionDropCard.Size = UDim2.new(1, 0, 0, 96); potionDropCard.BackgroundColor3 = DARK.item; potionDropCard.BorderSizePixel = 0
+    Instance.new("UICorner", potionDropCard).CornerRadius = UDim.new(0, 8)
+    local pdcStroke = Instance.new("UIStroke", potionDropCard); pdcStroke.Color = DARK.border; pdcStroke.Thickness = 1
+
+    pTitle = Instance.new("TextLabel", potionDropCard)
+    pTitle.Size = UDim2.new(1, -190, 0, 20); pTitle.Position = UDim2.new(0, 14, 0, 10)
+    pTitle.BackgroundTransparency = 1; pTitle.Text = "🧪 Potion Branches Manager (6 Themes)"
+    pTitle.TextColor3 = DARK.text; pTitle.TextXAlignment = Enum.TextXAlignment.Left; pTitle.Font = FONT_BOLD; pTitle.TextSize = 14
+
+    pSub = Instance.new("TextLabel", potionDropCard)
+    pSub.Size = UDim2.new(1, -190, 0, 16); pSub.Position = UDim2.new(0, 14, 0, 32)
+    pSub.BackgroundTransparency = 1; pSub.Text = "หมวดหมู่: Luck • มีน้ำยาในกระเป๋า: 0 ชิ้น"
+    pSub.TextColor3 = DARK.subtext; pSub.TextXAlignment = Enum.TextXAlignment.Left; pSub.Font = FONT_MEDIUM; pSub.TextSize = 11
+
+    pStatusLbl = Instance.new("TextLabel", potionDropCard)
+    pStatusLbl.Size = UDim2.new(1, -28, 0, 20); pStatusLbl.Position = UDim2.new(0, 14, 0, 56)
+    pStatusLbl.BackgroundTransparency = 1; pStatusLbl.Text = "Active: กำลังตรวจสอบสถานะบัฟ..."
+    pStatusLbl.TextColor3 = Color3.fromRGB(80, 255, 160); pStatusLbl.TextXAlignment = Enum.TextXAlignment.Left; pStatusLbl.Font = FONT_MEDIUM; pStatusLbl.TextSize = 11
+
+    luckDropBtn = Instance.new("TextButton", potionDropCard)
+    luckDropBtn.Size = UDim2.new(0, 160, 0, 32); luckDropBtn.Position = UDim2.new(1, -174, 0, 14)
+    luckDropBtn.BackgroundColor3 = Color3.fromRGB(36, 26, 54); luckDropBtn.BorderSizePixel = 0
+    luckDropBtn.Text = "Select Branches (6/6)  ▾"; luckDropBtn.TextColor3 = Color3.fromRGB(245, 235, 255)
+    luckDropBtn.Font = FONT_BOLD; luckDropBtn.TextSize = 12
+    Instance.new("UICorner", luckDropBtn).CornerRadius = UDim.new(0, 6)
+    local ldbStroke = Instance.new("UIStroke", luckDropBtn)
+    ldbStroke.Color = DARK.purple; ldbStroke.Thickness = 1.2
+
+    local LUCK_ITEM_H = 34
+    local LUCK_PADDING = 2
+
+    luckDropMenu = Instance.new("ScrollingFrame", main)
+    luckDropMenu.Size = UDim2.new(0, 235, 0, 220)
+    luckDropMenu.BackgroundColor3 = DARK.dropdown
+    luckDropMenu.BorderSizePixel = 0; luckDropMenu.ScrollBarThickness = 4
+    luckDropMenu.ScrollBarImageColor3 = DARK.purple; luckDropMenu.Visible = false; luckDropMenu.ZIndex = 100
+    Instance.new("UICorner", luckDropMenu).CornerRadius = UDim.new(0, 8)
+    local ldmStroke = Instance.new("UIStroke", luckDropMenu); ldmStroke.Color = DARK.border; ldmStroke.Thickness = 1.5
+    local ldList = Instance.new("UIListLayout", luckDropMenu); ldList.Padding = UDim.new(0, LUCK_PADDING)
+    local ldPad = Instance.new("UIPadding", luckDropMenu)
+    ldPad.PaddingTop = UDim.new(0, 5); ldPad.PaddingBottom = UDim.new(0, 5)
+    ldPad.PaddingLeft = UDim.new(0, 5); ldPad.PaddingRight = UDim.new(0, 5)
+
+    local function toggleLuckDropdown()
+        if luckDropMenu.Visible then
+            luckDropMenu.Visible = false
+        else
+            if dropMenu then dropMenu.Visible = false end
+            if skillDropMenu then skillDropMenu.Visible = false end
+            local absPos = luckDropBtn.AbsolutePosition
+            local mainPos = main.AbsolutePosition
+            local curScale = (uiScale and uiScale.Scale > 0) and uiScale.Scale or 1
+            luckDropMenu.Position = UDim2.new(0, (absPos.X - mainPos.X)/curScale - 60, 0, (absPos.Y - mainPos.Y)/curScale + 36)
+            luckDropMenu.Visible = true
+        end
+    end
+    luckDropBtn.MouseButton1Click:Connect(toggleLuckDropdown)
+
+    updateCategoryDropdown = function()
+        local pType = CFG.PotionType or "Luck"
+        local pData = POTION_DATA[pType]
+        if not pData then return end
+
+        pTitle.Text = "🧪 " .. pType .. " Branches Manager (6 Themes)"
+        local counts, total = getPotionsInInventory(pType)
+        pSub.Text = string.format("หมวดหมู่: %s • มีน้ำยาในกระเป๋า: %d ชิ้น", pType, total)
+
+        for _, child in ipairs(luckDropMenu:GetChildren()) do
+            if child:IsA("TextButton") then child:Destroy() end
+        end
+
+        local typeSels = SelectedPotionCategories[pType]
+        if not typeSels then
+            typeSels = {}
+            SelectedPotionCategories[pType] = typeSels
+            for _, cat in ipairs(pData.categories) do typeSels[cat.id] = true end
+        end
+
+        local totalListHeight = #pData.categories * (LUCK_ITEM_H + LUCK_PADDING) + 12
+        luckDropMenu.CanvasSize = UDim2.new(0, 0, 0, totalListHeight)
+        luckDropMenu.Size = UDim2.new(0, 235, 0, math.min(220, totalListHeight))
+
+        local function updateBtnText()
+            local count = 0
+            for _, cat in ipairs(pData.categories) do
+                if typeSels[cat.id] ~= false then count = count + 1 end
+            end
+            luckDropBtn.Text = string.format("Branches (%d/%d)  ▾", count, #pData.categories)
+            luckDropBtn.TextColor3 = (count > 0) and DARK.hAccent or Color3.fromRGB(240, 230, 255)
+        end
+        updateBtnText()
+
+        for _, cat in ipairs(pData.categories) do
+            local opt = Instance.new("TextButton", luckDropMenu)
+            opt.Size = UDim2.new(1, 0, 0, LUCK_ITEM_H); opt.BackgroundColor3 = DARK.item; opt.BackgroundTransparency = 1
+            opt.BorderSizePixel = 0; opt.Text = ""; opt.ZIndex = 101
+            Instance.new("UICorner", opt).CornerRadius = UDim.new(0, 6)
+
+            local chk = Instance.new("TextLabel", opt)
+            chk.Size = UDim2.new(0, 18, 1, 0); chk.Position = UDim2.new(0, 6, 0, 0)
+            chk.BackgroundTransparency = 1; chk.Text = "○"; chk.TextColor3 = DARK.subtext
+            chk.Font = FONT_BOLD; chk.TextSize = 13; chk.ZIndex = 102
+
+            local oName = Instance.new("TextLabel", opt)
+            oName.Size = UDim2.new(1, -28, 0, 16); oName.Position = UDim2.new(0, 26, 0, 2)
+            oName.BackgroundTransparency = 1; oName.Text = cat.name; oName.TextColor3 = DARK.text
+            oName.TextXAlignment = Enum.TextXAlignment.Left; oName.Font = FONT_BOLD; oName.TextSize = 12; oName.ZIndex = 102
+
+            local oSub = Instance.new("TextLabel", opt)
+            oSub.Size = UDim2.new(1, -28, 0, 14); oSub.Position = UDim2.new(0, 26, 0, 18)
+            oSub.BackgroundTransparency = 1; oSub.Text = cat.sub; oSub.TextColor3 = DARK.subtext
+            oSub.TextXAlignment = Enum.TextXAlignment.Left; oSub.Font = FONT_MEDIUM; oSub.TextSize = 10; oSub.ZIndex = 102
+
+            local function refreshOpt()
+                local isSel = typeSels[cat.id] ~= false
+                chk.Text = isSel and "●" or "○"
+                chk.TextColor3 = isSel and DARK.hAccent or DARK.subtext
+                oName.TextColor3 = isSel and Color3.new(1,1,1) or DARK.text
+                opt.BackgroundTransparency = isSel and 0 or 1
+                opt.BackgroundColor3 = isSel and DARK.itemSel or DARK.item
+            end
+            refreshOpt()
+
+            opt.MouseButton1Click:Connect(function()
+                typeSels[cat.id] = not (typeSels[cat.id] ~= false)
+                refreshOpt()
+                updateBtnText()
+            end)
+        end
+    end
+    updateCategoryDropdown()
+
+    -- 3. Dedicated "Use Best Now" Button Card (ตามหมวดหมู่ที่เลือก โดยไม่ซ้ำกัน)
+    makeButton(pages["Potion"], "Use Best Now", "กดใช้น้ำยาระดับสูงสุดโดยไม่ซ้ำกันตามหมวดหมู่ที่เลือกทันที 1 ครั้ง", "⚡ Use Best", function()
+        useBestPotionNow(CFG.PotionType)
+    end)
+
+    -- 4. Auto Use Potions Toggle (Auto maintains buffs for selected category type)
+    makeCfgToggle(pages["Potion"], "AutoUsePotion", "Auto Use Potions", "กดใช้น้ำยาระดับสูงสุดอัตโนมัติเมื่อเวลาบัฟหมดตามหมวดหมู่ที่เลือก (Luck / Cash / Damage)")
+
+    -- 5. Auto Luck on Luck Event Toggle
+    makeCfgToggle(pages["Potion"], "AutoLuckOnEvent", "Auto Luck on Luck Event", "เมื่อ Luck Event เซิร์ฟเวอร์เริ่ม จะกดใช้น้ำยาโชคทุกชนิด (Tier สูงสุด) ทันทีอย่างละ 1 ครั้ง", function(val)
+        if val then
+            task.spawn(checkEventAutoLuck)
+        end
+    end)
+
+    -- Background status updater for Potion tab
+    task.spawn(function()
+        while pages["Potion"] do
+            task.wait(1.5)
+            pcall(function()
+                local pType = (CFG and CFG.PotionType) or "Luck"
+                local activeMap = getActivePotionInfo(pType)
+                local activeParts = {}
+                local pData = POTION_DATA[pType]
+                if pData then
+                    for _, cat in ipairs(pData.categories) do
+                        local cur = activeMap[cat.id]
+                        if cur and cur.remaining > 0 then
+                            table.insert(activeParts, cur.name .. " (" .. cur.remaining .. "s)")
+                        end
+                    end
+                end
+                if #activeParts > 0 then
+                    pStatusLbl.Text = "Active: " .. table.concat(activeParts, ", ")
+                    pStatusLbl.TextColor3 = Color3.fromRGB(80, 255, 160)
+                else
+                    pStatusLbl.Text = "Active: ไม่มีน้ำยา " .. pType .. " กำลังทำงานอยู่ (Idle)"
+                    pStatusLbl.TextColor3 = DARK.subtext
+                end
+            end)
+        end
+    end)
+end
+pcall(setupPotionTab)
+
+-- Event tab removed
 local towerBanner=Instance.new("Frame",pages["Tower"])
 towerBanner.Size=UDim2.new(1,0,0,52); towerBanner.BackgroundColor3=Color3.fromRGB(38,18,68); towerBanner.BorderSizePixel=0
 Instance.new("UICorner",towerBanner).CornerRadius=UDim.new(0,8)
@@ -2672,13 +3599,13 @@ Instance.new("UIStroke",towerBanner).Color=DARK.purple
 tBannerTitle=Instance.new("TextLabel",towerBanner)
 tBannerTitle.Size=UDim2.new(1,-20,0,18); tBannerTitle.Position=UDim2.new(0,14,0,7)
 tBannerTitle.BackgroundTransparency=1; tBannerTitle.TextColor3=Color3.new(1,1,1)
-tBannerTitle.TextXAlignment=Enum.TextXAlignment.Left; tBannerTitle.Font=FONT; tBannerTitle.TextSize=12
+tBannerTitle.TextXAlignment=Enum.TextXAlignment.Left; tBannerTitle.Font=FONT_BOLD; tBannerTitle.TextSize=14
 tBannerTitle.Text="🏰 Tower Queue System"
 
 tBannerSub=Instance.new("TextLabel",towerBanner)
 tBannerSub.Size=UDim2.new(1,-20,0,14); tBannerSub.Position=UDim2.new(0,14,0,28)
 tBannerSub.BackgroundTransparency=1; tBannerSub.TextColor3=Color3.fromRGB(190,155,255)
-tBannerSub.TextXAlignment=Enum.TextXAlignment.Left; tBannerSub.Font=FONT; tBannerSub.TextSize=10
+tBannerSub.TextXAlignment=Enum.TextXAlignment.Left; tBannerSub.Font=FONT_MEDIUM; tBannerSub.TextSize=11
 tBannerSub.Text="เลือกหอคอยที่ต้องการแล้วกดเริ่มลงได้ทันที"
 
 local dropCard=Instance.new("Frame",pages["Tower"])
@@ -2688,18 +3615,18 @@ Instance.new("UICorner",dropCard).CornerRadius=UDim.new(0,8)
 local dTitle=Instance.new("TextLabel",dropCard)
 dTitle.Size=UDim2.new(1,-170,0,18); dTitle.Position=UDim2.new(0,14,0,7)
 dTitle.BackgroundTransparency=1; dTitle.Text="Select Towers"
-dTitle.TextColor3=DARK.text; dTitle.TextXAlignment=Enum.TextXAlignment.Left; dTitle.Font=FONT; dTitle.TextSize=12
+dTitle.TextColor3=DARK.text; dTitle.TextXAlignment=Enum.TextXAlignment.Left; dTitle.Font=FONT_BOLD; dTitle.TextSize=14
 
 local dSub=Instance.new("TextLabel",dropCard)
 dSub.Size=UDim2.new(1,-170,0,14); dSub.Position=UDim2.new(0,14,0,28)
 dSub.BackgroundTransparency=1; dSub.Text="เลือกหอคอยที่ต้องการลง (เลือกได้หลายหอคอย)"
-dSub.TextColor3=DARK.subtext; dSub.TextXAlignment=Enum.TextXAlignment.Left; dSub.Font=FONT; dSub.TextSize=10
+dSub.TextColor3=DARK.subtext; dSub.TextXAlignment=Enum.TextXAlignment.Left; dSub.Font=FONT_MEDIUM; dSub.TextSize=11
 
 dropBtn=Instance.new("TextButton",dropCard)
 dropBtn.Size=UDim2.new(0,145,0,28); dropBtn.Position=UDim2.new(1,-155,0.5,-14)
 dropBtn.BackgroundColor3=Color3.fromRGB(32,24,48); dropBtn.BorderSizePixel=0
 dropBtn.Text="Select Towers  ▾"; dropBtn.TextColor3=Color3.fromRGB(240,230,255)
-dropBtn.Font=FONT; dropBtn.TextSize=11
+dropBtn.Font=FONT_BOLD; dropBtn.TextSize=12
 Instance.new("UICorner",dropBtn).CornerRadius=UDim.new(0,6)
 local dropBtnStroke=Instance.new("UIStroke",dropBtn)
 dropBtnStroke.Color=DARK.purple; dropBtnStroke.Thickness=1.2
@@ -2792,7 +3719,7 @@ makeCfgToggle(pages["Tower"],"EquipTeamBefore","Equip Best Team First","สว�
 
 towerRunBtn=Instance.new("TextButton",pages["Tower"])
 towerRunBtn.Size=UDim2.new(1,0,0,52); towerRunBtn.BackgroundColor3=DARK.purple; towerRunBtn.BorderSizePixel=0
-towerRunBtn.TextColor3=Color3.new(1,1,1); towerRunBtn.Font=FONT; towerRunBtn.TextSize=12
+towerRunBtn.TextColor3=Color3.new(1,1,1); towerRunBtn.Font=FONT_BOLD; towerRunBtn.TextSize=13
 towerRunBtn.Text="▶ Start Selected Towers (1 Run Each)"
 Instance.new("UICorner",towerRunBtn).CornerRadius=UDim.new(0,8)
 Instance.new("UIStroke",towerRunBtn).Color=Color3.fromRGB(180,140,255)
@@ -2805,7 +3732,178 @@ towerRunBtn.MouseButton1Click:Connect(function()
     end
 end)
 end
-setupTowerTab()
+pcall(setupTowerTab)
+
+-- ── Teleport tab ─────────────────────────────────────────────────────────────
+local function setupTeleportTab()
+    local tpBanner = Instance.new("Frame", pages["Teleport"])
+    tpBanner.Size = UDim2.new(1, 0, 0, 50)
+    tpBanner.BackgroundColor3 = Color3.fromRGB(24, 34, 32)
+    tpBanner.BorderSizePixel = 0
+    Instance.new("UICorner", tpBanner).CornerRadius = UDim.new(0, 8)
+    local tpStroke = Instance.new("UIStroke", tpBanner)
+    tpStroke.Color = Color3.fromRGB(40, 110, 85)
+
+    local tpTitle = Instance.new("TextLabel", tpBanner)
+    tpTitle.Size = UDim2.new(1, -20, 0, 18); tpTitle.Position = UDim2.new(0, 14, 0, 7)
+    tpTitle.BackgroundTransparency = 1; tpTitle.TextColor3 = Color3.new(1, 1, 1)
+    tpTitle.TextXAlignment = Enum.TextXAlignment.Left; tpTitle.Font = FONT_BOLD; tpTitle.TextSize = 14
+    tpTitle.Text = "🗺️ Remote Auto Teleport (วาร์ปจุดสำคัญ)"
+
+    local tpSub = Instance.new("TextLabel", tpBanner)
+    tpSub.Size = UDim2.new(1, -20, 0, 14); tpSub.Position = UDim2.new(0, 14, 0, 27)
+    tpSub.BackgroundTransparency = 1; tpSub.TextColor3 = Color3.fromRGB(130, 205, 175)
+    tpSub.TextXAlignment = Enum.TextXAlignment.Left; tpSub.Font = FONT_MEDIUM; tpSub.TextSize = 11
+    tpSub.Text = "วาร์ปไปยังตำแหน่งสำคัญต่างๆ ในแมพได้ทันทีแบบไร้ดีเลย์"
+
+    -- Dropdown Selector
+    local tpOptions = {}
+    local currentLocIdx = 1
+    for i, loc in ipairs(UtilityFeatures.TeleportLocations) do
+        table.insert(tpOptions, {
+            text = loc.name,
+            sub = loc.sub,
+            value = loc.id
+        })
+        if loc.id == CFG.SelectedTeleport then
+            currentLocIdx = i
+        end
+    end
+
+    local _, setTpSel = makeSelector(pages["Teleport"], "Select Destination", "เลือกจุดหมายที่ต้องการวาร์ปไป", tpOptions, currentLocIdx, function(val, idx)
+        CFG.SelectedTeleport = val
+        currentLocIdx = idx
+    end)
+
+    makeButton(pages["Teleport"], "Teleport Now", "วาร์ปไปยังจุดหมายที่เลือกไว้ด้านบนทันที", "Teleport", function()
+        local loc = UtilityFeatures.TeleportLocations[currentLocIdx]
+        if loc then
+            UtilityFeatures.teleportTo(loc)
+        end
+    end)
+
+    -- Quick Teleport Buttons Grid
+    local quickCard = Instance.new("Frame", pages["Teleport"])
+    quickCard.Size = UDim2.new(1, 0, 0, 138)
+    quickCard.BackgroundColor3 = DARK.item
+    quickCard.BorderSizePixel = 0
+    Instance.new("UICorner", quickCard).CornerRadius = UDim.new(0, 8)
+    local qStroke = Instance.new("UIStroke", quickCard)
+    qStroke.Color = DARK.border
+
+    local qTitle = Instance.new("TextLabel", quickCard)
+    qTitle.Size = UDim2.new(1, -20, 0, 16); qTitle.Position = UDim2.new(0, 14, 0, 8)
+    qTitle.BackgroundTransparency = 1; qTitle.TextColor3 = DARK.accent
+    qTitle.TextXAlignment = Enum.TextXAlignment.Left; qTitle.Font = FONT_BOLD; qTitle.TextSize = 14
+    qTitle.Text = "⚡ Quick Teleport Buttons (กดปุ่มวาร์ปทันที)"
+
+    local quickGrid = Instance.new("Frame", quickCard)
+    quickGrid.Size = UDim2.new(1, -24, 0, 100); quickGrid.Position = UDim2.new(0, 12, 0, 28)
+    quickGrid.BackgroundTransparency = 1
+    local uig = Instance.new("UIGridLayout", quickGrid)
+    uig.CellSize = UDim2.new(0.235, 0, 0, 44)
+    uig.CellPadding = UDim2.new(0.02, 0, 0, 8)
+
+    local quickList = {
+        { id = "MyPlot",   label = "🏠 My Base" },
+        { id = "Tower",    label = "🏰 Tower" },
+        { id = "DiceShop", label = "🎲 Dice Shop" },
+        { id = "Shop",     label = "🛒 Shop" },
+        { id = "Fuse",     label = "⚔️ Aura Fuse" },
+        { id = "Grades",   label = "✨ Grade Reroll" },
+        { id = "Traits",   label = "🧬 Trait Reroll" },
+        { id = "Selling",  label = "💰 Sell Zone" },
+    }
+
+    for _, q in ipairs(quickList) do
+        local qb = Instance.new("TextButton", quickGrid)
+        qb.BackgroundColor3 = Color3.fromRGB(32, 28, 44)
+        qb.BorderSizePixel = 0
+        qb.Font = FONT; qb.TextSize = 10; qb.TextColor3 = Color3.fromRGB(235, 225, 255)
+        qb.Text = q.label
+        Instance.new("UICorner", qb).CornerRadius = UDim.new(0, 6)
+        local btnStroke = Instance.new("UIStroke", qb)
+        btnStroke.Color = Color3.fromRGB(60, 50, 80); btnStroke.Thickness = 1
+
+        qb.MouseButton1Click:Connect(function()
+            for _, loc in ipairs(UtilityFeatures.TeleportLocations) do
+                if loc.id == q.id then
+                    TweenService:Create(qb, TweenInfo.new(0.08), { BackgroundColor3 = DARK.accent, TextColor3 = Color3.new(0,0,0) }):Play()
+                    task.wait(0.1)
+                    TweenService:Create(qb, TweenInfo.new(0.15), { BackgroundColor3 = Color3.fromRGB(32, 28, 44), TextColor3 = Color3.fromRGB(235, 225, 255) }):Play()
+                    UtilityFeatures.teleportTo(loc)
+                    break
+                end
+            end
+        end)
+    end
+end
+pcall(setupTeleportTab)
+
+-- ── Quest & Rebirth tab ─────────────────────────────────────────────────────────
+local function setupQuestRebirthTab()
+    -- ── Section 1: Rebirth System ──────────────────────────────────────────────
+    makeCfgToggle(pages["Quest & Rebirth"], "AutoRebirth", "Auto Rebirth", "รีเบิร์ธอัตโนมัติทันทีเมื่อเงินถึงเกณฑ์ (ปลดล็อกช่อง Plot เพิ่มตาม Tier)")
+
+    makeButton(pages["Quest & Rebirth"], "Rebirth Now", "ส่งคำขอ Rebirth ไปยังเซิร์ฟเวอร์ทันที 1 ครั้ง", "Rebirth", function()
+        local curLvl = getRebirthLevel()
+        local nextCost = REBIRTH_COSTS[curLvl + 1]
+        if not nextCost then
+            showNotif("คุณอยู่ในระดับ Rebirth สูงสุดแล้ว!")
+            return
+        end
+        if getMoney() < nextCost then
+            showNotif(string.format("เงินไม่พอสำหรับ Rebirth (ต้องการ $%s)", formatNumber(nextCost)))
+            return
+        end
+        local ok = pcall(function() RebirthSignal:FireServer() end)
+        if ok then
+            showNotif(string.format("ส่งคำขอ Rebirth แล้ว (Tier %d -> %d) ✓", curLvl, curLvl + 1))
+        end
+    end)
+
+    -- ── Section 2: Quests Automation ───────────────────────────────────────────
+    local qCard = Instance.new("Frame", pages["Quest & Rebirth"])
+    qCard.Size = UDim2.new(1, 0, 0, 52)
+    qCard.BackgroundColor3 = DARK.item; qCard.BorderSizePixel = 0
+    Instance.new("UICorner", qCard).CornerRadius = UDim.new(0, 8)
+    local qStroke = Instance.new("UIStroke", qCard)
+    qStroke.Color = DARK.border; qStroke.Thickness = 1.2
+
+    local qIcon = Instance.new("TextLabel", qCard)
+    qIcon.Size = UDim2.new(0, 32, 0, 32); qIcon.Position = UDim2.new(0, 10, 0, 10)
+    qIcon.BackgroundTransparency = 1; qIcon.Text = "📜"; qIcon.TextSize = 22
+    qIcon.Font = FONT
+
+    local qTitle = Instance.new("TextLabel", qCard)
+    qTitle.Size = UDim2.new(1, -55, 0, 16); qTitle.Position = UDim2.new(0, 48, 0, 8)
+    qTitle.BackgroundTransparency = 1; qTitle.Text = "Quests Reward Manager"
+    qTitle.TextColor3 = DARK.text; qTitle.TextXAlignment = Enum.TextXAlignment.Left
+    qTitle.Font = FONT; qTitle.TextSize = 11
+
+    local qSub = Instance.new("TextLabel", qCard)
+    qSub.Size = UDim2.new(1, -55, 0, 14); qSub.Position = UDim2.new(0, 48, 0, 26)
+    qSub.BackgroundTransparency = 1; qSub.Text = "รับของรางวัลเควส Daily และ Weekly อัตโนมัติหรือกดรับทันที"
+    qSub.TextColor3 = DARK.subtext; qSub.TextXAlignment = Enum.TextXAlignment.Left
+    qSub.Font = FONT_MEDIUM; qSub.TextSize = 11
+
+    makeCfgToggle(pages["Quest & Rebirth"], "AutoQuest", "Auto Claim Quests", "ตรวจเช็คและกดรับของรางวัลเควสทั้งหมดอัตโนมัติ (Daily & Weekly)")
+
+    makeButton(pages["Quest & Rebirth"], "Claim Quests Now", "กดรับของรางวัลเควสทั้งหมดที่ทำสำเร็จทันที 1 ครั้ง", "Claim Quests", function()
+        task.spawn(function()
+            showNotif("กำลังส่งคำขอรับของรางวัลเควสทั้งหมด...")
+            claimAllQuests()
+            showNotif("รับของรางวัลเควสเรียบร้อย ✓")
+        end)
+    end)
+
+    -- ── Section 3: Free Rewards ────────────────────────────────────────────────
+    makeCfgToggle(pages["Quest & Rebirth"], "AutoClaimRewards", "Auto Claim Free Rewards", "รับของรางวัลฟรีทั้งหมดอัตโนมัติ (Daily Login, Group Chest, และ Offline Cash)")
+    makeButton(pages["Quest & Rebirth"], "Claim Free Rewards Now", "กดรับ Daily Login, Group Chest, และ Offline Cash ทันที 1 ครั้ง", "Claim All", function()
+        claimAllFreeRewards(true)
+    end)
+end
+pcall(setupQuestRebirthTab)
 
 -- Close dropdowns when clicking outside
 main.InputBegan:Connect(function(i)
@@ -2848,17 +3946,44 @@ end)
 
 -- ── Utility tab ───────────────────────────────────────────────────────────────
 local function setupUtilityTab()
+    -- ── Section 1: Performance & Low Detail Mode ──────────────────────────────
+    local perfBanner = Instance.new("Frame", pages["Utility"])
+    perfBanner.Size = UDim2.new(1, 0, 0, 50)
+    perfBanner.BackgroundColor3 = Color3.fromRGB(20, 26, 42)
+    perfBanner.BorderSizePixel = 0
+    Instance.new("UICorner", perfBanner).CornerRadius = UDim.new(0, 8)
+    local pStroke = Instance.new("UIStroke", perfBanner)
+    pStroke.Color = Color3.fromRGB(48, 80, 140)
 
-makeCfgToggle(pages["Utility"],"AntiAFK","Anti-AFK","ป้องกันการถูกเตะจากการอยู่เฉยเกิน 20 นาที (กดปุ่ม F13 ทุก 60 วินาที)")
+    local pTitle = Instance.new("TextLabel", perfBanner)
+    pTitle.Size = UDim2.new(1, -20, 0, 18); pTitle.Position = UDim2.new(0, 14, 0, 7)
+    pTitle.BackgroundTransparency = 1; pTitle.TextColor3 = Color3.new(1, 1, 1)
+    pTitle.TextXAlignment = Enum.TextXAlignment.Left; pTitle.Font = FONT_BOLD; pTitle.TextSize = 14
+    pTitle.Text = "🚀 Low Detail Mode & Performance (Multi-Instance)"
 
-makeCfgToggle(pages["Utility"],"SuperRAMSaver","AFK Super Saver (1+2+3)","กดทีเดียว: ปิด 3D จอขาว + ล้างขยะ RAM ทุก 60s + ปิดเสียง", function(v) toggleSuperRAMSaver(v) end)
-makeCfgToggle(pages["Utility"],"HideGameUI","Hide Game UI (4)","ซ่อน UI เกมทั้งหมด (ยกเว้น Cheat Hub) ลดภาระ CPU/RAM", function(v) toggleHideGameUI(v) end)
-makeCfgToggle(pages["Utility"],"Disable3DRender","Disable 3D Rendering","ปิดภาพ 3D (จอขาว) ประหยัด CPU & RAM เหมาะกับ AFK", function(v) toggle3DRendering(v) end)
-makeCfgToggle(pages["Utility"],"BoostFPS","Boost FPS","ลดเอฟเฟกต์/กราฟิกและแสงเงา เพิ่มความลื่นไหลและ FPS", function(v) toggleBoostFPS(v) end)
-makeCfgToggle(pages["Utility"],"AutoQuest","Auto Claim Quests","รับของรางวัลเควสทั้งหมดอัตโนมัติ")
+    local pSub = Instance.new("TextLabel", perfBanner)
+    pSub.Size = UDim2.new(1, -20, 0, 14); pSub.Position = UDim2.new(0, 14, 0, 27)
+    pSub.BackgroundTransparency = 1; pSub.TextColor3 = Color3.fromRGB(140, 175, 230)
+    pSub.TextXAlignment = Enum.TextXAlignment.Left; pSub.Font = FONT_MEDIUM; pSub.TextSize = 11
+    pSub.Text = "ลดภาระ CPU/RAM และลื่นไหลที่สุดเมื่อเปิดหลายจอ (MuMu / LDPlayer)"
 
+    -- 1. Low Detail Mode (All-in-One)
+    makeCfgToggle(pages["Utility"], "LowDetailMode", "Low Detail Mode (All-in-One)", "เปิดทีเดียว: ปิดสภาพอากาศ + ซ่อนตัวคนอื่น + ปิด Particle + Boost FPS", function(v)
+        UtilityFeatures.toggleLowDetailMode(v)
+    end)
+
+    -- 2. AFK Super Saver (1+2+3) directly after Low Detail Mode
+    makeCfgToggle(pages["Utility"], "SuperRAMSaver", "AFK Super Saver (1+2+3)", "กดทีเดียว: ปิด 3D จอขาว + ล้างขยะ RAM ทุก 60s + ปิดเสียง", function(v)
+        toggleSuperRAMSaver(v)
+    end)
+
+    -- 3. Anti-AFK
+    makeCfgToggle(pages["Utility"], "AntiAFK", "Anti-AFK", "ป้องกันการถูกเตะจากการอยู่เฉยเกิน 20 นาที (กดปุ่ม F13 ทุก 60 วินาที)")
+
+    -- Note: Redundant individual toggles are kept in backend logic (UtilityFeatures, toggleBoostFPS, toggle3DRendering, etc.)
+    -- but omitted from UI as requested in favor of the all-in-one modes.
 end
-setupUtilityTab()
+pcall(setupUtilityTab)
 
 -- ── Misc tab (Config Manager) ────────────────────────────────────────────────
 local function setupMiscTab()
@@ -3108,21 +4233,21 @@ local function setupMiscTab()
         local t = Instance.new("TextLabel", card)
         t.Size = UDim2.new(1,-170,0,18); t.Position = UDim2.new(0,14,0,8)
         t.BackgroundTransparency = 1; t.Text = title; t.TextColor3 = DARK.text
-        t.TextXAlignment = Enum.TextXAlignment.Left; t.Font = FONT; t.TextSize = 12
+        t.TextXAlignment = Enum.TextXAlignment.Left; t.Font = FONT_BOLD; t.TextSize = 13
         if sub then
             local s = Instance.new("TextLabel", card)
             s.Size = UDim2.new(1,-170,0,14); s.Position = UDim2.new(0,14,0,28)
             s.BackgroundTransparency = 1; s.Text = sub; s.TextColor3 = DARK.subtext
-            s.TextXAlignment = Enum.TextXAlignment.Left; s.Font = FONT; s.TextSize = 10
+            s.TextXAlignment = Enum.TextXAlignment.Left; s.Font = FONT_MEDIUM; s.TextSize = 11
             return s
         end
     end
 
     local mh = addCard(52)
     local mhT = Instance.new("TextLabel", mh)
-    mhT.Size = UDim2.new(1,-20,0,18); mhT.Position = UDim2.new(0,14,0,8); mhT.BackgroundTransparency = 1; mhT.Text = "Config System (Profile Manager)"; mhT.TextColor3 = DARK.text; mhT.TextXAlignment = Enum.TextXAlignment.Left; mhT.Font = FONT; mhT.TextSize = 12
+    mhT.Size = UDim2.new(1,-20,0,18); mhT.Position = UDim2.new(0,14,0,8); mhT.BackgroundTransparency = 1; mhT.Text = "Config System (Profile Manager)"; mhT.TextColor3 = DARK.text; mhT.TextXAlignment = Enum.TextXAlignment.Left; mhT.Font = FONT_BOLD; mhT.TextSize = 14
     local mhS = Instance.new("TextLabel", mh)
-    mhS.Size = UDim2.new(1,-20,0,14); mhS.Position = UDim2.new(0,14,0,28); mhS.BackgroundTransparency = 1; mhS.Text = "บันทึก โหลด ลบ และตั้งค่า Autoload การตั้งค่าทั้งหมด"; mhS.TextColor3 = DARK.subtext; mhS.TextXAlignment = Enum.TextXAlignment.Left; mhS.Font = FONT; mhS.TextSize = 10
+    mhS.Size = UDim2.new(1,-20,0,14); mhS.Position = UDim2.new(0,14,0,28); mhS.BackgroundTransparency = 1; mhS.Text = "บันทึก โหลด ลบ และตั้งค่า Autoload การตั้งค่าทั้งหมด"; mhS.TextColor3 = DARK.subtext; mhS.TextXAlignment = Enum.TextXAlignment.Left; mhS.Font = FONT_MEDIUM; mhS.TextSize = 11
 
     local nc = addCard(52)
     addCardText(nc, "Config Name", "พิมพ์ชื่อโปรไฟล์ที่ต้องการบันทึก")
@@ -3130,7 +4255,7 @@ local function setupMiscTab()
     cfgNameBox.Size = UDim2.new(0,145,0,28); cfgNameBox.Position = UDim2.new(1,-155,0.5,-14)
     cfgNameBox.BackgroundColor3 = Color3.fromRGB(32,24,48); cfgNameBox.BorderSizePixel = 0
     cfgNameBox.Text = "default"; cfgNameBox.TextColor3 = Color3.fromRGB(240,230,255)
-    cfgNameBox.Font = FONT; cfgNameBox.TextSize = 11; cfgNameBox.ClearTextOnFocus = false
+    cfgNameBox.Font = FONT_BOLD; cfgNameBox.TextSize = 13; cfgNameBox.ClearTextOnFocus = false
     Instance.new("UICorner", cfgNameBox).CornerRadius = UDim.new(0,6)
     Instance.new("UIStroke", cfgNameBox).Color = DARK.purple
 
@@ -3140,7 +4265,7 @@ local function setupMiscTab()
     cfgDropBtn.Size = UDim2.new(0,145,0,28); cfgDropBtn.Position = UDim2.new(1,-155,0.5,-14)
     cfgDropBtn.BackgroundColor3 = Color3.fromRGB(32,24,48); cfgDropBtn.BorderSizePixel = 0
     cfgDropBtn.Text = "Select Config  ▾"; cfgDropBtn.TextColor3 = Color3.fromRGB(240,230,255)
-    cfgDropBtn.Font = FONT; cfgDropBtn.TextSize = 11
+    cfgDropBtn.Font = FONT_BOLD; cfgDropBtn.TextSize = 13
     Instance.new("UICorner", cfgDropBtn).CornerRadius = UDim.new(0,6)
     Instance.new("UIStroke", cfgDropBtn).Color = DARK.purple
 
@@ -3209,7 +4334,7 @@ local function setupMiscTab()
     brL.FillDirection = Enum.FillDirection.Horizontal; brL.Padding = UDim.new(0,8)
 
     local btnBg = Color3.fromRGB(32,24,48)
-    local btnFont = Enum.Font.SourceSans
+    local btnFont = FONT_BOLD
     local btnSize = 13
 
     local saveBtn = Instance.new("TextButton", btnRow)
@@ -3310,8 +4435,8 @@ local function setupMiscTab()
         "  • โฟลเดอร์: 540Cheats_Configs/<name>.json\n" ..
         "  • บันทึกค่า: ฟังก์ชันทั้งหมด, หอคอยที่เลือก, สกิลที่เลือก\n" ..
         "  • Autoload: เมื่อตั้งไว้ จะดึงค่าคอนฟิกนี้มาเปิดทันทีที่รันสคริปต์"
-    miscInfo.TextColor3 = DARK.subtext; miscInfo.TextXAlignment = Enum.TextXAlignment.Left
-    miscInfo.TextYAlignment = Enum.TextYAlignment.Center; miscInfo.Font = FONT; miscInfo.TextSize = 11
+    miscInfo.TextColor3 = Color3.fromRGB(220,220,240); miscInfo.TextXAlignment = Enum.TextXAlignment.Left
+    miscInfo.TextYAlignment = Enum.TextYAlignment.Center; miscInfo.Font = FONT_MEDIUM; miscInfo.TextSize = 12
     Instance.new("UICorner", miscInfo).CornerRadius = UDim.new(0,8)
 
     task.spawn(function()
@@ -3326,7 +4451,7 @@ local function setupMiscTab()
         end
     end)
 end
-setupMiscTab()
+pcall(setupMiscTab)
 
 -- ── Webhook tab ─────────────────────────────────────────────────────────────
 local function setupWebhookTab()
@@ -3368,7 +4493,7 @@ local function setupWebhookTab()
     urlTitle.Size = UDim2.new(1, -20, 0, 18); urlTitle.Position = UDim2.new(0, 12, 0, 8)
     urlTitle.BackgroundTransparency = 1; urlTitle.Text = "Discord Webhook URL"
     urlTitle.TextColor3 = DARK.text; urlTitle.TextXAlignment = Enum.TextXAlignment.Left
-    urlTitle.Font = FONT; urlTitle.TextSize = 12
+    urlTitle.Font = FONT_BOLD; urlTitle.TextSize = 14
 
     local urlBox = Instance.new("TextBox", urlCard)
     urlBox.Size = UDim2.new(1, -24, 0, 34); urlBox.Position = UDim2.new(0, 12, 0, 34)
@@ -3377,7 +4502,7 @@ local function setupWebhookTab()
     urlBox.PlaceholderText = "วางลิงก์ https://discord.com/api/webhooks/... ที่นี่"
     urlBox.PlaceholderColor3 = DARK.subtext
     urlBox.TextColor3 = Color3.fromRGB(240, 230, 255)
-    urlBox.Font = FONT; urlBox.TextSize = 11; urlBox.ClearTextOnFocus = false
+    urlBox.Font = FONT_MEDIUM; urlBox.TextSize = 12; urlBox.ClearTextOnFocus = false
     urlBox.TextXAlignment = Enum.TextXAlignment.Left
     Instance.new("UICorner", urlBox).CornerRadius = UDim.new(0, 6)
     local ubs = Instance.new("UIStroke", urlBox)
@@ -3421,7 +4546,8 @@ makeCfgToggle(pages["Webhook"], "WeatherNotifyWebhook", "Weather Event Alert", "
         CFG.WebhookStatsInterval = val
     end)
 end
-setupWebhookTab()
+-- [TEMPORARILY HIDDEN WEBHOOK TAB]
+-- setupWebhookTab()
 
 -- ── Settings tab ──────────────────────────────────────────────────────────────
 do
@@ -3462,7 +4588,7 @@ info.TextYAlignment=Enum.TextYAlignment.Top; info.Font=FONT; info.TextSize=12
 Instance.new("UICorner",info).CornerRadius=UDim.new(0,8)
 end
 
-do
+(function()
 minimizedLogo=Instance.new("TextButton",gui)
 minimizedLogo.Size=UDim2.new(0,50,0,50); minimizedLogo.Position=UDim2.new(0,25,0.5,-25)
 minimizedLogo.BackgroundColor3=DARK.bg; minimizedLogo.BackgroundTransparency=0.2
@@ -3509,11 +4635,13 @@ end)
 
 local wm=Instance.new("TextLabel",gui)
 wm.Size=UDim2.new(0,320,0,30); wm.Position=UDim2.new(1,-340,1,-50)
-wm.BackgroundTransparency=1; wm.Text="CHEAT HUB | discord.gg/540shop"
+wm.BackgroundTransparency=1; wm.Text="540 HUB | discord.gg/540shop"
 wm.TextColor3=DARK.accent; wm.TextXAlignment=Enum.TextXAlignment.Right
 wm.Font=FONT; wm.TextSize=14; wm.TextTransparency=0.2
-wm.TextStrokeTransparency=0.4; wm.TextStrokeColor3=Color3.new(0,0,0)
+wm.TextStrokeTransparency=0.4; wm.TextStrokeColor3=Color3.new(0,0,0); wm.Visible=false
+end)()
 end
+pcall(buildHubUI)
 
 UIS.InputBegan:Connect(function(i,g)
     if i.KeyCode==Enum.KeyCode.B and not UIS:GetFocusedTextBox() then
@@ -3543,6 +4671,6 @@ UIS.InputBegan:Connect(function(i,g)
         gui.Enabled=true; main.Visible=true; minimizedLogo.Visible=false; return end
 end)
 
-print("[CHEAT HUB v24] พร้อมใช้งาน ✓")
-pcall(function() showNotif("CHEAT HUB v24 พร้อมใช้งานแล้ว") end)
+print("[540 HUB] พร้อมใช้งาน ✓")
+pcall(function() showNotif("540 HUB พร้อมใช้งานแล้ว ✓") end)
 
