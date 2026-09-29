@@ -2932,15 +2932,36 @@ local function createTab(name,icon)
     local page=Instance.new("ScrollingFrame",main)
     page.Size=UDim2.new(1,-215,1,-HH-18); page.Position=UDim2.new(0,205,0,HH+9)
     page.BackgroundTransparency=1; page.BorderSizePixel=0
-    page.ScrollBarThickness=3; page.ScrollBarImageColor3=DARK.accent
-    page.CanvasSize=UDim2.new(0,0,0,0); page.AutomaticCanvasSize=Enum.AutomaticSize.Y; page.Visible=false
-    Instance.new("UIListLayout",page).Padding=UDim.new(0,8)
-    local pp=Instance.new("UIPadding",page); pp.PaddingTop=UDim.new(0,4); pp.PaddingRight=UDim.new(0,8)
+    page.ScrollBarThickness=6; page.ScrollBarImageColor3=Color3.fromRGB(170, 90, 255)
+    page.ScrollBarImageTransparency=0.2; page.ScrollingDirection=Enum.ScrollingDirection.Y
+    page.CanvasSize=UDim2.new(0,0,0,0); page.Visible=false
+    page.VerticalScrollBarInset=Enum.ScrollBarInset.ScrollBar
+    Instance.new("UICorner", page).CornerRadius=UDim.new(0, 4)
+
+    local pageLayout=Instance.new("UIListLayout",page)
+    pageLayout.Padding=UDim.new(0,8)
+    local pp=Instance.new("UIPadding",page)
+    pp.PaddingTop=UDim.new(0,4); pp.PaddingRight=UDim.new(0,10); pp.PaddingBottom=UDim.new(0,24)
+
+    local function updatePageCanvas()
+        local h = pageLayout.AbsoluteContentSize.Y
+        if h > 0 then
+            page.CanvasSize = UDim2.new(0, 0, 0, h + 36)
+        end
+    end
+    pageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updatePageCanvas)
+    page:GetPropertyChangedSignal("Visible"):Connect(function()
+        if page.Visible then
+            task.defer(updatePageCanvas)
+        end
+    end)
+    page.ChildAdded:Connect(function() task.defer(updatePageCanvas) end)
+    page.ChildRemoved:Connect(function() task.defer(updatePageCanvas) end)
 
     -- Auto-insert 540 HUB Banner at top of page
     createPageBanner(page, name)
 
-    tabs[name]={btn=btn, lbl=lbl, ico=ico}
+    tabs[name]={btn=btn, lbl=lbl, ico=ico, updateCanvas=updatePageCanvas}
     pages[name]=page
 
     btn.MouseButton1Click:Connect(function()
@@ -2955,6 +2976,7 @@ local function createTab(name,icon)
         page.Visible=true
         lbl.TextColor3=Color3.new(1,1,1)
         ico.TextColor3=DARK.accent
+        task.defer(updatePageCanvas)
     end)
 end
 
@@ -2973,6 +2995,14 @@ end)
 createTab("Main","🏠"); createTab("Roll","🎲"); createTab("Skill","⚡")
 createTab("Tower","🏰"); createTab("Potion","🧪"); createTab("Quest & Rebirth","📜")
 createTab("Teleport","🗺️"); createTab("Utility","⚙️"); createTab("Misc","💾"); createTab("Settings","🛠️")
+
+-- Ensure all tabs have their canvas heights calculated accurately
+task.spawn(function()
+    task.wait(0.5)
+    for _, t in pairs(tabs) do
+        if t.updateCanvas then pcall(t.updateCanvas) end
+    end
+end)
 
 tabs["Main"].btn.BackgroundTransparency=0
 tabs["Main"].btn.BackgroundColor3=DARK.itemSel
@@ -3862,40 +3892,7 @@ local function setupQuestRebirthTab()
         end
     end)
 
-    -- ── Section 2: Quests Automation ───────────────────────────────────────────
-    local qCard = Instance.new("Frame", pages["Quest & Rebirth"])
-    qCard.Size = UDim2.new(1, 0, 0, 52)
-    qCard.BackgroundColor3 = DARK.item; qCard.BorderSizePixel = 0
-    Instance.new("UICorner", qCard).CornerRadius = UDim.new(0, 8)
-    local qStroke = Instance.new("UIStroke", qCard)
-    qStroke.Color = DARK.border; qStroke.Thickness = 1.2
 
-    local qIcon = Instance.new("TextLabel", qCard)
-    qIcon.Size = UDim2.new(0, 32, 0, 32); qIcon.Position = UDim2.new(0, 10, 0, 10)
-    qIcon.BackgroundTransparency = 1; qIcon.Text = "📜"; qIcon.TextSize = 22
-    qIcon.Font = FONT
-
-    local qTitle = Instance.new("TextLabel", qCard)
-    qTitle.Size = UDim2.new(1, -55, 0, 16); qTitle.Position = UDim2.new(0, 48, 0, 8)
-    qTitle.BackgroundTransparency = 1; qTitle.Text = "Quests Reward Manager"
-    qTitle.TextColor3 = DARK.text; qTitle.TextXAlignment = Enum.TextXAlignment.Left
-    qTitle.Font = FONT; qTitle.TextSize = 11
-
-    local qSub = Instance.new("TextLabel", qCard)
-    qSub.Size = UDim2.new(1, -55, 0, 14); qSub.Position = UDim2.new(0, 48, 0, 26)
-    qSub.BackgroundTransparency = 1; qSub.Text = "รับของรางวัลเควส Daily และ Weekly อัตโนมัติหรือกดรับทันที"
-    qSub.TextColor3 = DARK.subtext; qSub.TextXAlignment = Enum.TextXAlignment.Left
-    qSub.Font = FONT_MEDIUM; qSub.TextSize = 11
-
-    makeCfgToggle(pages["Quest & Rebirth"], "AutoQuest", "Auto Claim Quests", "ตรวจเช็คและกดรับของรางวัลเควสทั้งหมดอัตโนมัติ (Daily & Weekly)")
-
-    makeButton(pages["Quest & Rebirth"], "Claim Quests Now", "กดรับของรางวัลเควสทั้งหมดที่ทำสำเร็จทันที 1 ครั้ง", "Claim Quests", function()
-        task.spawn(function()
-            showNotif("กำลังส่งคำขอรับของรางวัลเควสทั้งหมด...")
-            claimAllQuests()
-            showNotif("รับของรางวัลเควสเรียบร้อย ✓")
-        end)
-    end)
 
     -- ── Section 3: Free Rewards ────────────────────────────────────────────────
     makeCfgToggle(pages["Quest & Rebirth"], "AutoClaimRewards", "Auto Claim Free Rewards", "รับของรางวัลฟรีทั้งหมดอัตโนมัติ (Daily Login, Group Chest, และ Offline Cash)")
