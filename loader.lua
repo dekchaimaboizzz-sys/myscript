@@ -3894,6 +3894,16 @@ local function setupQuestRebirthTab()
 
 
 
+    -- ── Section 2: Quests Automation ───────────────────────────────────────────
+    makeCfgToggle(pages["Quest & Rebirth"], "AutoQuest", "Auto Claim Quests", "ตรวจเช็คและกดรับของรางวัลเควสทั้งหมดอัตโนมัติ (Daily & Weekly)")
+    makeButton(pages["Quest & Rebirth"], "Claim Quests Now", "กดรับของรางวัลเควสทั้งหมดที่ทำสำเร็จทันที 1 ครั้ง", "Claim Quests", function()
+        task.spawn(function()
+            showNotif("กำลังส่งคำขอรับของรางวัลเควสทั้งหมด...")
+            claimAllQuests()
+            showNotif("รับของรางวัลเควสเรียบร้อย ✓")
+        end)
+    end)
+
     -- ── Section 3: Free Rewards ────────────────────────────────────────────────
     makeCfgToggle(pages["Quest & Rebirth"], "AutoClaimRewards", "Auto Claim Free Rewards", "รับของรางวัลฟรีทั้งหมดอัตโนมัติ (Daily Login, Group Chest, และ Offline Cash)")
     makeButton(pages["Quest & Rebirth"], "Claim Free Rewards Now", "กดรับ Daily Login, Group Chest, และ Offline Cash ทันที 1 ครั้ง", "Claim All", function()
