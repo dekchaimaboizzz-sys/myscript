@@ -124,6 +124,17 @@ local QuestSignal    = nil; pcall(function() QuestSignal = RE("QuestService", "C
 local BuyDice        = nil; pcall(function() BuyDice = RE("DiceShopService", "BuyDice") end)
 local EquipDice      = nil; pcall(function() EquipDice = RE("DiceShopService", "EquipDice") end)
 local RollDice       = nil; pcall(function() RollDice = RF("RollService", "RollDice") end)
+local SellInventoryRF  = nil; pcall(function() SellInventoryRF = RF("SellService", "SellInventory") end)
+local SellEquippedRF   = nil; pcall(function() SellEquippedRF  = RF("SellService", "SellEquipped") end)
+local UpdateAutoSellRE = nil; pcall(function() UpdateAutoSellRE = RE("SellService", "UpdateAutoSell") end)
+if not UpdateAutoSellRE or not SellInventoryRF then
+    pcall(function()
+        local ClientComm = require(RS.Packages.Network).ClientComm
+        local sComm = ClientComm.new(RS.Network, false, "SellService")
+        if not UpdateAutoSellRE then UpdateAutoSellRE = sComm:GetSignal("UpdateAutoSell") end
+        if not SellInventoryRF then SellInventoryRF = sComm:GetFunction("SellInventory") end
+    end)
+end
 local BuyUpgrade     = nil; pcall(function() BuyUpgrade = REroot("BuyUpgrade") end)
 local CancelTower    = nil; pcall(function() CancelTower = RF("Towers", "CancelTower") end)
 local EquipBestTeam  = nil; pcall(function() EquipBestTeam = RE("Towers", "EquipBestTowerTeam") end)
@@ -383,7 +394,12 @@ CFG = {
     AutoEquipMode    = "Rarity",
     AutoRoll         = false,
     FastAutoRoll     = false,
-    RollDelay        = 0.1,
+    RollDelay        = 0.15,
+    AutoSellRolled   = false,
+    AutoSellThreshold= 1000,
+    AutoCleanInventory = true,
+    ShowRollCashNotif= true,
+    AutoReconnect    = true,
     SkipCutscene     = true,
     AutoRebirth            = false,
     AntiAFK                = true,
@@ -463,6 +479,65 @@ local function getMoney()
 end
 local function getRebirthLevel()
     local DC=getDC(); if DC and DC.Rebirth then return tonumber(DC.Rebirth()) or 0 end; return 0
+end
+
+local function syncInGameAutoSell(threshold)
+    if UpdateAutoSellRE then
+        pcall(function()
+            if UpdateAutoSellRE.FireServer then
+                UpdateAutoSellRE:FireServer(threshold or 0)
+            elseif UpdateAutoSellRE.Fire then
+                UpdateAutoSellRE:Fire(threshold or 0)
+            end
+        end)
+    end
+end
+
+local function cleanInventoryAutoSell(notify)
+    local DC = getDC()
+    if not DC or not DC.Inventory or not DC.Slots then return 0 end
+    local inv = nil
+    pcall(function() inv = DC.Inventory() end)
+    if not inv or type(inv) ~= "table" then return 0 end
+    local slots = nil
+    pcall(function() slots = DC.Slots() end)
+    if not slots or type(slots) ~= "table" then slots = {} end
+
+    local equippedKeys = {}
+    if slots and type(slots) == "table" then
+        for _, sData in pairs(slots) do
+            if type(sData) == "table" and sData.unitId then
+                equippedKeys[sData.unitId] = true
+            elseif type(sData) == "string" then
+                equippedKeys[sData] = true
+            end
+        end
+    end
+
+    local threshold = CFG.AutoSellThreshold or 1000
+    local keysToSell = {}
+    for key, item in pairs(inv) do
+        if item and item.name and not equippedKeys[key] then
+            local r = getUnitRarity(item)
+            local isLocked = item.locked == true or item.favorite == true
+            if not isLocked and r and r <= threshold then
+                table.insert(keysToSell, key)
+            end
+        end
+    end
+
+    if #keysToSell > 0 and SellInventoryRF then
+        local ok, gained = pcall(function()
+            return SellInventoryRF:InvokeServer(keysToSell)
+        end)
+        if ok and gained and gained > 0 then
+            if notify then
+                showNotif(string.format("💰 ขายยูนิตอัตโนมัติ %d ตัว (+%s Cash)", #keysToSell, formatNumberCompact(gained)))
+            end
+            return gained
+        end
+    end
+    return 0
 end
 
 -- ── Discord Webhook System ───────────────────────────────────────────────────
@@ -1875,18 +1950,60 @@ task.spawn(function() while true do task.wait(EQUIP_LOOP)
 end end)
 task.spawn(function()
     while true do
-        local delayTime = 2.6
-        if CFG.FastAutoRoll then
-            delayTime = CFG.RollDelay or 0.1
-        elseif CFG.AutoRoll then
-            delayTime = CFG.RollDelay or 2.6
+        local isFast = CFG.FastAutoRoll
+        local isNormal = CFG.AutoRoll
+        if not (isFast or isNormal) then
+            task.wait(0.5)
+            continue
         end
-        task.wait(math.max(0.05, delayTime))
-        if CFG.FastAutoRoll or CFG.AutoRoll then
-            local ok, res = pcall(function() return RollDice:InvokeServer() end)
-            if ok and res and type(res) == "table" then
-                task.spawn(checkRollWebhook, res)
+
+        -- Check storage before roll to prevent "Inventory Full" server lock
+        if CFG.AutoCleanInventory or isFast then
+            local DC = getDC()
+            if DC and DC.Inventory then
+                local inv = nil
+                pcall(function() inv = DC.Inventory() end)
+                if inv and type(inv) == "table" then
+                    local count = 0
+                    for _ in pairs(inv) do count = count + 1 end
+                    -- If inventory has many units (>= 18), clean junk units before next roll
+                    if count >= 18 then
+                        pcall(function() cleanInventoryAutoSell(false) end)
+                        task.wait(0.1)
+                    end
+                end
             end
+        end
+
+        local baseDelay = 2.5
+        if isFast then
+            -- Safe adaptive fast delay: minimum 0.15s to prevent Android/Emulator packet buffer overflow (Connection Lost)
+            baseDelay = math.max(0.15, tonumber(CFG.RollDelay) or 0.15)
+        else
+            baseDelay = math.max(1.0, tonumber(CFG.RollDelay) or 2.5)
+        end
+
+        local startMoney = getMoney()
+        local ok, res = pcall(function() return RollDice:InvokeServer() end)
+
+        if ok and res and type(res) == "table" then
+            task.spawn(checkRollWebhook, res)
+
+            -- Track auto sell cash increase and confirm visually
+            task.delay(0.6, function()
+                local newMoney = getMoney()
+                if newMoney > startMoney then
+                    local diff = newMoney - startMoney
+                    if CFG.ShowRollCashNotif then
+                        showNotif(string.format("💰 ได้รับ +%s Cash จากการขายยูนิตที่สุ่มได้", formatNumberCompact(diff)))
+                    end
+                end
+            end)
+
+            task.wait(baseDelay)
+        else
+            -- Backoff slightly if server is on debounce cooldown (prevents 10/sec RemoteFunction packet spam)
+            task.wait(math.max(0.35, baseDelay))
         end
     end
 end)
@@ -1941,15 +2058,94 @@ end end)
 task.spawn(function() while true do task.wait(2)
     if CFG.AutoUseLuck or CFG.AutoUsePotion then pcall(autoUsePotions) end
 end end)
-task.spawn(function() while true do task.wait(60)
+-- ── Robust Multi-Platform Anti-AFK (PC & Emulator / Mobile) ───────────────────
+pcall(function()
+    if getconnections then
+        for _, conn in ipairs(getconnections(LP.Idled)) do
+            if conn.Disable then conn:Disable()
+            elseif conn.Disconnect then conn:Disconnect() end
+        end
+    end
+end)
+
+LP.Idled:Connect(function()
     if CFG.AntiAFK then
         pcall(function()
-            VIM:SendKeyEvent(true,Enum.KeyCode.F13,false,game)
-            task.wait(0.05)
-            VIM:SendKeyEvent(false,Enum.KeyCode.F13,false,game)
+            if VirtualUser then
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.zero)
+            end
         end)
     end
-end end)
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(40)
+        if CFG.AntiAFK then
+            pcall(function()
+                if VirtualUser then
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new(50, 50))
+                end
+                if VIM then
+                    VIM:SendKeyEvent(true, Enum.KeyCode.F13, false, game)
+                    task.wait(0.02)
+                    VIM:SendKeyEvent(false, Enum.KeyCode.F13, false, game)
+                end
+            end)
+        end
+    end
+end)
+
+-- ── Auto Reconnect / Anti-Disconnection Guardian (Emulator Safe) ──────────────
+local function setupAutoReconnect()
+    local reconnecting = false
+    local function attemptReconnect(reason)
+        if reconnecting or not CFG.AutoReconnect then return end
+        reconnecting = true
+        warn("[540 HUB] ตรวจพบการหลุดการเชื่อมต่อ (" .. tostring(reason) .. ") -> กำลังเชื่อมต่อใหม่เข้าเซิร์ฟเวอร์...")
+        
+        task.wait(2.5)
+        pcall(function()
+            if #Players:GetPlayers() <= 1 then
+                TeleportService:Teleport(game.PlaceId, LP)
+            else
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LP)
+            end
+        end)
+        
+        task.wait(5)
+        pcall(function()
+            TeleportService:Teleport(game.PlaceId, LP)
+        end)
+    end
+
+    pcall(function()
+        local GuiService = game:GetService("GuiService")
+        GuiService.ErrorMessageChanged:Connect(function(msg)
+            if msg and msg ~= "" then
+                attemptReconnect("ErrorMessageChanged: " .. tostring(msg))
+            end
+        end)
+    end)
+
+    pcall(function()
+        local CoreGui = game:GetService("CoreGui")
+        local promptOverlay = CoreGui:WaitForChild("RobloxPromptGui", 10):WaitForChild("promptOverlay", 10)
+        if promptOverlay then
+            promptOverlay.ChildAdded:Connect(function(child)
+                if child.Name == "ErrorPrompt" or child:FindFirstChild("MessageArea") then
+                    attemptReconnect("ErrorPrompt Dialog Appeared")
+                end
+            end)
+            if promptOverlay:FindFirstChild("ErrorPrompt") then
+                attemptReconnect("Existing ErrorPrompt Detected")
+            end
+        end
+    end)
+end
+pcall(setupAutoReconnect)
 
 -- ── Boost FPS Optimizer ───────────────────────────────────────────────────────
 local Lighting = game:GetService("Lighting")
@@ -3291,23 +3487,36 @@ pcall(setupMainTab)
 
 -- ── Roll tab ──────────────────────────────────────────────────────────────────
 local function setupRollTab()
-makeCfgToggle(pages["Roll"],"FastAutoRoll","Fast Auto Roll","ทอยลูกเต๋าแบบเร็วพิเศษ ยิงคำสั่งรัวตาม Cooldown เซิร์ฟเวอร์")
+makeCfgToggle(pages["Roll"],"FastAutoRoll","Fast Auto Roll","ทอยลูกเต๋าแบบเร็วพิเศษ ปรับอัตราส่งข้อมูลปลอดภัยไม่หลุดเซิร์ฟ")
 local _, srd = makeSelector(pages["Roll"],"Roll Delay","ปรับความเร็วการส่งคำสั่งทอยลูกเต๋า",{
-    { text = "0.1s (Ultra Fast)", value = 0.1, sub = "ยิงรัวทุก 0.1s ทันทีที่เซิร์ฟเวอร์พร้อม (~1.2s-2.5s)" },
-    { text = "0.2s (Fast)",       value = 0.2, sub = "ยิงทุก 0.2s รวดเร็วและลดโหลดส่งข้อมูล" },
-    { text = "0.5s (Medium)",     value = 0.5, sub = "ทอยเร็วปานกลางทุก 0.5s" },
-    { text = "1.0s (Normal)",     value = 1.0, sub = "ทอยทุก 1 วินาที" },
-    { text = "2.6s (Default)",    value = 2.6, sub = "ทอยตามความเร็วพื้นฐานเดิมของเกม" },
+    { text = "0.15s (Ultra Fast)", value = 0.15, sub = "เร็วสูงสุดพร้อมระบบกัน Packet หลุดสำหรับ Emulator" },
+    { text = "0.2s (Fast)",        value = 0.2,  sub = "ยิงทุก 0.2s รวดเร็วและเสถียรมาก" },
+    { text = "0.5s (Medium)",      value = 0.5,  sub = "ทอยเร็วปานกลางทุก 0.5s" },
+    { text = "1.0s (Normal)",      value = 1.0,  sub = "ทอยทุก 1 วินาที" },
+    { text = "2.6s (Default)",     value = 2.6,  sub = "ทอยตามความเร็วพื้นฐานเดิมของเกม" },
 }, 1, function(val) CFG.RollDelay = val end)
 setRollDelay = srd
 makeCfgToggle(pages["Roll"],"SkipCutscene","Skip Roll Cutscene (Fast)","ข้ามฉากคัตซีนแรร์ ไม่ล็อกมุมกล้อง ไม่เสียเวลาคัตซีน")
--- [TEMPORARILY HIDDEN FROM ROLL TAB]
--- makeCfgToggle(pages["Roll"],"AutoRoll","Normal Auto Roll","ทอยลูกเต๋าแบบปกติ (ดีเลย์ 2.6 วินาที)")
+
+-- Auto Sell & Cash Notification Controls
+makeCfgToggle(pages["Roll"],"AutoSellRolled","Auto Sell Rolled Units","ขายยูนิตขยะที่สุ่มได้โดยอัตโนมัติ (Server + Client Sync)")
+makeSelector(pages["Roll"],"Auto Sell Threshold","เลือกระดับโอกาสที่จะให้ขายทิ้งทันทีเมื่อสุ่มได้",{
+    { text = "< 100 (Common)",        value = 100,      sub = "ขายเฉพาะตัวธรรมดาต่ำกว่า 1 ใน 100" },
+    { text = "< 1,000 (Rare)",        value = 1000,     sub = "ขายยูนิตต่ำกว่า 1 ใน 1,000" },
+    { text = "< 10,000 (Epic)",       value = 10000,    sub = "ขายยูนิตต่ำกว่า 1 ใน 10,000" },
+    { text = "< 100,000 (Legendary)", value = 100000,   sub = "ขายยูนิตต่ำกว่า 1 ใน 100,000" },
+    { text = "< 1,000,000 (Mythic)",  value = 1000000,  sub = "ขายยูนิตต่ำกว่า 1 ใน 1,000,000" },
+}, 2, function(val)
+    CFG.AutoSellThreshold = val
+    syncInGameAutoSell(val)
+end)
+makeCfgToggle(pages["Roll"],"AutoCleanInventory","Auto Clean Full Inventory","เคลียร์กระเป๋ายูนิตอัตโนมัติเมื่อใกล้เต็ม ป้องกัน Roll ติดขัด")
+makeCfgToggle(pages["Roll"],"ShowRollCashNotif","Show Roll Cash Notif","แสดงการแจ้งเตือนเงินที่ได้รับเมื่อขายตัวจากการสุ่ม")
+makeButton(pages["Roll"],"Sell Inventory Junk Now","กดขายยูนิตขยะทั้งหมดในกระเป๋าทันที 1 ครั้งตามเกณฑ์ด้านบน","Sell Junk",function()
+    cleanInventoryAutoSell(true)
+end)
+
 makeCfgToggle(pages["Roll"],"AutoBuyDice","Auto Buy Best Dice","ซื้อลูกเต๋าที่มีค่าโชคสูงสุดอัตโนมัติ")
--- [TEMPORARILY HIDDEN FROM ROLL TAB]
--- makeCfgToggle(pages["Roll"],"AutoEquipDice","Auto Equip Best Dice","สวมใส่ลูกเต๋าที่ดีที่สุดอัตโนมัติ")
-
-
 end
 pcall(setupRollTab)
 
@@ -3985,7 +4194,8 @@ local function setupUtilityTab()
     end)
 
     -- 3. Anti-AFK
-    makeCfgToggle(pages["Utility"], "AntiAFK", "Anti-AFK", "ป้องกันการถูกเตะจากการอยู่เฉยเกิน 20 นาที (กดปุ่ม F13 ทุก 60 วินาที)")
+    makeCfgToggle(pages["Utility"], "AntiAFK", "Anti-AFK", "ป้องกันการถูกเตะจากการอยู่เฉยเกิน 20 นาที (รองรับ Mobile & Emulator)")
+makeCfgToggle(pages["Utility"], "AutoReconnect", "Auto Reconnect (Anti-Disconnect)", "เชื่อมต่อเข้าเกมใหม่อัตโนมัติเมื่อหลุด Connection Lost สำหรับจอ Emulator")
 
     -- Note: Redundant individual toggles are kept in backend logic (UtilityFeatures, toggleBoostFPS, toggle3DRendering, etc.)
     -- but omitted from UI as requested in favor of the all-in-one modes.
