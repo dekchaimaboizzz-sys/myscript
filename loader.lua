@@ -39,7 +39,7 @@ local PlotController    = nil; pcall(function() PlotController = require(RS.Fram
 local EntryDropCtrl     = nil; pcall(function() EntryDropCtrl = require(RS.Framework.Features.Notifications.EntryDropController) end)
 local _towerFinishedSignal = 0
 local showNotif = function(text)
-    print("[CHEAT HUB] " .. tostring(text))
+    -- Silenced to prevent memory leak
 end
 
 local TowerScreen, TowerBg, HiddenBtn = nil, nil, nil
@@ -845,7 +845,7 @@ local function claimDailyReward(manual)
         local claimedIdx = 1
         pcall(function() claimedIdx = (DC.DailyRewardsClaimed and DC.DailyRewardsClaimed() or 0) + 1 end)
         showNotif("🎁 รับรางวัลรายวัน (Day " .. tostring(claimedIdx) .. ") เรียบร้อย ✓")
-        print("[REWARDS] Claimed Daily Reward Day " .. tostring(claimedIdx))
+        -- print removed
         pcall(sendRewardWebhook, "Daily Reward (Day " .. tostring(claimedIdx) .. ")", "รับรางวัลล็อกอินประจำวันสำเร็จ")
         return true
     elseif manual then
@@ -857,14 +857,18 @@ local function claimDailyReward(manual)
     return false
 end
 
+local _lastGroupClaimAttempt = 0
 local function claimGroupReward(manual)
     local DC = getDC(); if not DC then return false end
+    local now = os.time()
+    if not manual and (now - _lastGroupClaimAttempt < 300) then return false end
+    _lastGroupClaimAttempt = now
+
     local alreadyClaimed = false
     pcall(function() alreadyClaimed = DC.ClaimedGroupReward and DC.ClaimedGroupReward() end)
     if not alreadyClaimed then
         fireCommSignal(RewardSignals.GroupClaim)
         showNotif("👥 รับของรางวัลกลุ่ม (Group Chest) เรียบร้อย ✓")
-        print("[REWARDS] Claimed Group Chest Reward")
         pcall(sendRewardWebhook, "Group Chest", "รับของรางวัลกล่องกลุ่มเรียบร้อย")
         return true
     elseif manual then
@@ -881,7 +885,7 @@ local function claimOfflineEarnings(manual)
         fireCommSignal(RewardSignals.OfflineClaim)
         local formatted = formatNumberCompact(pending)
         showNotif("💰 รับเงินออฟไลน์ $" .. formatted .. " เรียบร้อย ✓")
-        print("[REWARDS] Claimed Offline Earnings: $" .. tostring(pending))
+        -- print removed
         pcall(sendRewardWebhook, "Offline Earnings", "รับเงินสะสมออฟไลน์ $" .. formatted)
         return true
     elseif manual then
@@ -1364,7 +1368,7 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
     local loopStr = CFG.LoopTower and string.format("Loop #%d · ", loopCount) or ""
 
     if getTowerActiveState() == true then
-        print(string.format("[TOWER] ตรวจพบหอคอยกำลังทำงานอยู่ รอให้รอบก่อนหน้าจบก่อน..."))
+        -- print removed
         setBanner(string.format("⚔️ [%d/%d] %s", curIndex, totalCount, towerName), loopStr .. "มีหอคอยทำงานอยู่ กำลังรอให้จบ...")
         local waitDeadline = tick() + 1800
         while CFG.AutoTowerQueue and getTowerActiveState() == true and tick() < waitDeadline do
@@ -1393,18 +1397,18 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
             started = true
             break
         end
-        print(string.format("[TOWER] รอความพร้อมเซิร์ฟเวอร์สำหรับ %s (ครั้งที่ %d/12)...", towerName, attempt))
+        -- print removed
         task.wait(3.0)
     end
 
     if not started then
-        print("[TOWER] ไม่สามารถเริ่มได้หลังจากพยายามหลายครั้ง:", towerName)
+        -- print removed
         showNotif("⚠️ เริ่ม " .. towerName .. " ไม่สำเร็จ (ข้ามไปยังหอคอยถัดไป)")
         task.wait(2.0)
         return false
     end
 
-    print("[TOWER] เริ่มหอคอยสำเร็จ:", towerName)
+    -- print removed
     setBanner(nil, loopStr .. "Floor 1 · กำลังต่อสู้...")
 
     local towerStartTime = tick()
@@ -1502,7 +1506,7 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
         end
 
         if _towerFinishedSignal and _towerFinishedSignal > towerStartTime then
-            print(string.format("[TOWER] จบการลงจากการแจ้งเตือนของเกม (Floor สูงสุด: %d)", lastSeenFloor or 1))
+            -- print removed
             break
         end
 
@@ -1552,7 +1556,7 @@ local function runSingleTower(towerName, curIndex, totalCount, loopCount)
         end)
     end)
 
-    print("[TOWER] จบการลง:", towerName, string.format("(ชั้นสูงสุด: %d)", lastSeenFloor or 1))
+    -- print removed
     setBanner(nil, loopStr .. "จบการลงแล้ว กำลังเตรียมตัวรอบถัดไป...")
     if CFG.WebhookEnabled and CFG.WebhookNotifyTower then
         task.spawn(sendTowerWebhook, towerName, lastSeenFloor or 1, loopCount)
@@ -1601,7 +1605,7 @@ local function startTowerQueue()
             end
         end)
         if not ok then
-            print("[TOWER ERROR]", err)
+            -- print removed
         end
 
         CFG.AutoTowerQueue = false
@@ -1870,7 +1874,7 @@ local function checkEventAutoLuck()
             lastHandledWeatherStart = wStart
             task.spawn(function()
                 local used = useBestLuckNow(true)
-                print("[LUCK EVENT] Auto-used " .. used .. " best luck potions!")
+                -- print removed
                 pcall(function()
                     showNotif("🍀 Luck Event ตรวจพบแล้ว! กดใช้น้ำยาโชคระดับสูงสุด " .. used .. " ชนิดเรียบร้อย ✓")
                 end)
@@ -2695,7 +2699,6 @@ Instance.new("UICorner",notif).CornerRadius=UDim.new(0,8)
 Instance.new("UIStroke",notif).Color=DARK.accent
 
 showNotif = function(text)
-    print("[CHEAT HUB] " .. tostring(text))
     pcall(function()
         if notif then
             notif.Text = "  > " .. tostring(text)
@@ -3469,7 +3472,7 @@ local _, sem = makeSelector(pages["Main"],"Equip Priority","เลือกเ�
 }, CFG.AutoEquipMode == "Income" and 2 or 1, function(val) CFG.AutoEquipMode = val end)
 setEquipMode = sem
 makeButton(pages["Main"],"Equip Best Now","กดเพื่อจัดยูนิตลง Plot ทันทีตามเกณฑ์ที่เลือก","Equip",function()
-    print("[CHEAT HUB] Clicked Equip Best Now (Mode: " .. tostring(CFG.AutoEquipMode) .. ")")
+    -- print removed
     if CFG.AutoEquipMode == "Rarity" then
         equipBestByRarity(true)
     else
@@ -4890,4 +4893,3 @@ end)
 
 print("[540 HUB] พร้อมใช้งาน ✓")
 pcall(function() showNotif("540 HUB พร้อมใช้งานแล้ว ✓") end)
-
