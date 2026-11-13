@@ -4465,6 +4465,7 @@ end)
 -- "gacha", "ocean_chest", "aura_sparkle", "reroll_bolt", "vehicle", "keybind", "settings"
 --====================================================================--
 RtState.TabMain = createTab("Main", "main")
+RtState.TabReward = createTab("Reward", "daily_star")
 RtState.TabSettings = createTab("Settings", "settings")
 
 
@@ -4477,12 +4478,17 @@ do
 	local ReelIn = Remotes:WaitForChild("ReelIn")
 	local SellFish = Remotes:WaitForChild("SellFish")
 	local NetFull = Remotes:FindFirstChild("NetFull")
+	local FishingShared = nil
+	pcall(function()
+		FishingShared = require(ReplicatedStorage:WaitForChild("FishingShared"))
+	end)
 
 	-- Event Remotes
 	local MegEvent = Remotes:WaitForChild("MegEvent")
 	local BloopEvent = Remotes:WaitForChild("BloopEvent")
 	local BossEvent = Remotes:WaitForChild("BossEvent")
 	local PirateEvent = Remotes:FindFirstChild("PirateEvent")
+	pcall(function() LocalPlayer:SetAttribute("Set_Cutscenes", false) end)
 
 	-- Config Defaults
 	Cfg.AutoFishFull = (Cfg.AutoFishFull == true)
@@ -4694,6 +4700,16 @@ do
 		return nil
 	end
 
+	local function getMySpearGunPos()
+		local myBase = getMyBase()
+		if not myBase then return nil end
+		local sg = myBase:FindFirstChild("SpearGun")
+		if not sg then return nil end
+		local p = sg:GetAttribute("GunPivot")
+		if typeof(p) == "CFrame" then return p.Position end
+		return sg:GetPivot().Position
+	end
+
 	local isCollectingPlot = false
 	collectPlotMoney = function(force: boolean?)
 		if isCollectingPlot then return end
@@ -4766,29 +4782,74 @@ do
 		end
 
 		local savedCF = hrp.CFrame
-		local wasAnchored = hrp.Anchored
+		local cam = workspace.CurrentCamera
+		local savedCamCF = cam and cam.CFrame
+
+		-- 1. Anti-Trip & Anti-Ragdoll setup
+		pcall(function()
+			hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+			hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+			hum.PlatformStand = false
+			hum.Sit = false
+		end)
+
+		-- 2. Freeze camera in place so screen never shakes or jerks
+		if cam and savedCamCF then
+			pcall(function()
+				cam.CameraType = Enum.CameraType.Scriptable
+				cam.CFrame = savedCamCF
+			end)
+		end
+
+		-- 3. Temporarily disable part collisions so character never trips on ped geometry
+		local collParts = {}
+		for _, p in ipairs(char:GetDescendants()) do
+			if p:IsA("BasePart") and p.CanCollide then
+				table.insert(collParts, p)
+				p.CanCollide = false
+			end
+		end
+
 		local collectedCount = 0
 
+		-- 4. Blazing Fast TP Sweep (0.045s per pedestal, hovering 1.8 studs above pad)
 		for _, item in ipairs(toCollect) do
 			if not ScriptAlive or not hrp or not hrp.Parent then break end
 
 			hrp.AssemblyLinearVelocity = Vector3.zero
 			hrp.AssemblyAngularVelocity = Vector3.zero
-			hrp.CFrame = item.pad.CFrame + Vector3.new(0, 1.2, 0)
+			hrp.CFrame = CFrame.new(item.pad.Position + Vector3.new(0, 1.8, 0))
 
-			task.wait(0.08)
 			if CollectPadReq and item.slot then
 				pcall(function() CollectPadReq:FireServer(item.slot) end)
 			end
-			task.wait(0.08)
+			task.wait(0.045)
 			collectedCount = collectedCount + 1
 		end
 
+		-- 5. Restore original position, velocity, and upright state
 		if hrp and hrp.Parent then
 			hrp.AssemblyLinearVelocity = Vector3.zero
 			hrp.AssemblyAngularVelocity = Vector3.zero
 			hrp.CFrame = savedCF
-			hrp.Anchored = wasAnchored
+		end
+
+		for _, p in ipairs(collParts) do
+			if p.Parent then p.CanCollide = true end
+		end
+
+		pcall(function()
+			hum.PlatformStand = false
+			hum.Sit = false
+			hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end)
+
+		-- 6. Restore camera view
+		if cam and savedCamCF then
+			pcall(function()
+				cam.CFrame = savedCamCF
+				cam.CameraType = Enum.CameraType.Custom
+			end)
 		end
 
 		if RtState.PlotStatusTitleLbl then
@@ -4805,7 +4866,14 @@ do
 	task.spawn(function()
 		while ScriptAlive do
 			if Cfg.AutoFishFull then
-				if not isFishingActive() then
+				local isMegActive = (workspace:GetAttribute("MegActive") == true and Cfg.AutoMeg ~= false)
+				local isBloopActive = (workspace:GetAttribute("BloopActive") == true and Cfg.AutoBloop ~= false)
+				local inTurret = (LocalPlayer:GetAttribute("TurretMode") == true)
+
+				if isMegActive or isBloopActive or inTurret then
+					task.wait(0.5)
+				else
+					if not isFishingActive() then
 					if RtState.StatusTitleLbl then
 						RtState.StatusTitleLbl.Text = "Status: Throwing Net..."
 					end
@@ -4853,6 +4921,7 @@ do
 							task.wait(1.0)
 						end
 					end
+				end
 				end
 			end
 			task.wait(0.25)
@@ -4982,11 +5051,14 @@ do
 
 									if reelSim and sessionObj and (not sessionObj.over or not sessionObj.over()) and sessionObj.live then
 										local curTime = sessionObj.now()
-										local curX = reelSim.xAt(curTime)
-										local dist = math.abs(curX - reelSim.zc)
-										if dist <= (reelSim.zw * 0.13) then
-											if (os.clock() - lastReelHit) >= 0.32 then
-												lastReelHit = os.clock()
+										local canHit = (not reelSim.lockUntil) or (curTime >= reelSim.lockUntil)
+										if canHit then
+											local sDist = (reelSim.seenDist and reelSim.seenDist(curTime)) or 999
+											local curX = reelSim.xAt(curTime)
+											local instDist = math.abs(curX - reelSim.zc)
+											local hitThreshold = reelSim.zw * 0.15
+
+											if sDist <= hitThreshold or instDist <= hitThreshold then
 												if pressFn then pcall(function() pressFn() end) end
 												clickGuiBtn(reelBtn)
 												pressKey(Enum.KeyCode.Space)
@@ -5021,8 +5093,8 @@ do
 											local nX = needle.AbsolutePosition.X + needle.AbsoluteSize.X / 2
 											local zMin = goldZone.AbsolutePosition.X
 											local zMax = goldZone.AbsolutePosition.X + goldZone.AbsoluteSize.X
-											if nX >= (zMin - 3) and nX <= (zMax + 3) then
-												if (os.clock() - lastReelHit) >= 0.32 then
+											if nX >= (zMin - 4) and nX <= (zMax + 4) then
+												if (os.clock() - lastReelHit) >= 0.28 then
 													lastReelHit = os.clock()
 													clickGuiBtn(reelBtn)
 													pressKey(Enum.KeyCode.Space)
@@ -5116,99 +5188,42 @@ do
 								-- 3) Minigame: Bait Memory (Lures - 100% Exact Memory Sequence Reader)
 								local bait1 = area:FindFirstChild("Bait1", true)
 								if bait1 then
-									local promptLbl = nil
-									for _, desc in ipairs(area:GetDescendants()) do
-										if desc:IsA("TextLabel") and (string.find(desc.Text, "WATCH") or string.find(desc.Text, "YOUR TURN")) then
-											promptLbl = desc
-											break
-										end
-									end
-
 									local u168Fn = nil
-									local seqTable = nil
-									local isTurn = false
-
-									for bIdx = 1, 4 do
-										local b = area:FindFirstChild("Bait" .. bIdx, true)
-										if b then
-											local bBtn = b:IsA("GuiButton") and b or b:FindFirstChildWhichIsA("GuiButton")
-											if bBtn then
-												for _, c in ipairs(getconnections(bBtn.MouseButton1Click)) do
-													if c.Function then
-														for _, uv in pairs(getupvalues(c.Function)) do
-															if type(uv) == "function" then
-																u168Fn = uv
-																for _, subUv in pairs(getupvalues(uv)) do
-																	if type(subUv) == "table" and #subUv >= 1 and type(subUv[1]) == "number" then
-																		seqTable = subUv
-																	elseif type(subUv) == "boolean" then
-																		isTurn = subUv
-																	end
-																end
-															end
-														end
-													end
+									local bBtn = bait1:IsA("GuiButton") and bait1 or bait1:FindFirstChildWhichIsA("GuiButton")
+									if bBtn then
+										for _, c in ipairs(getconnections(bBtn.MouseButton1Click)) do
+											if c.Function then
+												local uv1 = getupvalue(c.Function, 1)
+												if type(uv1) == "function" then
+													u168Fn = uv1
+													break
 												end
 											end
 										end
-										if seqTable then break end
 									end
 
-									if not seqTable then
-										for _, fn in ipairs(getgc(false)) do
-											if type(fn) == "function" then
-												for _, uv in pairs(getupvalues(fn)) do
-													if type(uv) == "table" and #uv >= 3 and type(uv[1]) == "number" and type(uv[2]) == "number" and type(uv[3]) == "number" then
-														local allValid = true
-														for _, num in ipairs(uv) do
-															if type(num) ~= "number" or num < 1 or num > 4 then
-																allValid = false
-																break
-															end
-														end
-														if allValid and #uv <= 30 then
-															seqTable = uv
-															u168Fn = fn
-															break
-														end
-													end
-												end
-											end
-											if seqTable then break end
-										end
-									end
+									if u168Fn then
+										local isTurn = getupvalue(u168Fn, 1) -- u159 (true = YOUR TURN)
+										local sessionObj = getupvalue(u168Fn, 2)
+										local seqTable = getupvalue(u168Fn, 3) -- u157 (exact secret sequence array)
+										local curStep = getupvalue(u168Fn, 4) -- u160 (current step the game expects)
+										local isOver = sessionObj and sessionObj.over and sessionObj.over()
 
-									local isYourTurn = (isTurn == true) or (promptLbl and string.find(promptLbl.Text, "YOUR TURN") ~= nil)
-									if isYourTurn and seqTable and #seqTable > 0 then
-										local roundLen = #seqTable
-										if lastBaitSolvedRound ~= roundLen then
-											lastBaitSolvedRound = roundLen
-											if RtState.MgStatusTitleLbl then
-												RtState.MgStatusTitleLbl.Text = string.format("Bait Memory: Solving Round (%d baits)...", roundLen)
-											end
-											task.wait(0.2)
-											for step = 1, roundLen do
-												local targetBait = seqTable[step]
+										if isTurn == true and not isOver and type(seqTable) == "table" and type(curStep) == "number" then
+											if curStep >= 1 and curStep <= #seqTable then
+												local targetBait = seqTable[curStep]
 												if targetBait and targetBait >= 1 and targetBait <= 4 then
-													if u168Fn then
-														pcall(function() u168Fn(targetBait) end)
+													if RtState.MgStatusTitleLbl then
+														RtState.MgStatusTitleLbl.Text = string.format("Bait Memory: Step %d/%d (Bait %d)", curStep, #seqTable, targetBait)
 													end
-													local b = area:FindFirstChild("Bait" .. targetBait, true)
-													if b then
-														clickGuiBtn(b)
-														if numKeyMap[targetBait] then
-															pressKey(numKeyMap[targetBait])
-														end
-													end
+													pcall(function() u168Fn(targetBait) end)
+													task.wait(0.28)
 												end
-												task.wait(0.25)
 											end
-											task.wait(0.4)
-										end
-									elseif promptLbl and string.find(promptLbl.Text, "WATCH") then
-										lastBaitSolvedRound = -1
-										if RtState.MgStatusTitleLbl then
-											RtState.MgStatusTitleLbl.Text = "Bait Memory: Reading sequence..."
+										else
+											if RtState.MgStatusTitleLbl then
+												RtState.MgStatusTitleLbl.Text = "Bait Memory: Watching fish..."
+											end
 										end
 									end
 								end
@@ -5217,23 +5232,36 @@ do
 					end
 				end
 			end
-			task.wait(0.03)
+			if gameWin and gameWin.Visible then
+				task.wait(0.01)
+			else
+				task.wait(0.04)
+			end
 		end
 	end)
 
 	-- 3. All-Events Automation Thread (Kraken, Megalodon, Bloop, Pirate Raid, Wave Rush, Weather)
 	task.spawn(function()
 		local lastSpearFire = 0
+		local lastTurretEnterAttempt = 0
+		local megWasActive = false
+		local bloopWasActive = false
+		local bossWasActive = false
+		local savedFishingCF = nil
 
 		while ScriptAlive do
 			if Cfg.AutoEventsMaster ~= false then
 				local serverTime = workspace:GetServerTimeNow()
-				local isBossActive = workspace:GetAttribute("BossActive") == true
-				local isMegActive = workspace:GetAttribute("MegActive") == true
-				local isBloopActive = workspace:GetAttribute("BloopActive") == true
-				local isPirateActive = workspace:GetAttribute("PirateActive") == true
+				local isBossActive = (workspace:GetAttribute("BossActive") == true)
+				local isMegActive = (workspace:GetAttribute("MegActive") == true)
+				local isBloopActive = (workspace:GetAttribute("BloopActive") == true)
+				local isPirateActive = (workspace:GetAttribute("PirateActive") == true)
 				local isWaveActive = (workspace:GetAttribute("WaveRush") == true or workspace:GetAttribute("WaveActive") == true)
 				local riverEvent = workspace:GetAttribute("RiverEvent")
+
+				local char = LocalPlayer.Character
+				local hrp = char and char:FindFirstChild("HumanoidRootPart")
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
 
 				-- Determine Current Active Event
 				local activeName = "None"
@@ -5275,44 +5303,252 @@ do
 					end
 				end
 
-				-- 1) MEGALODON (Spear Gun Boss)
+				local myBase = getMyBase()
+				local sg = myBase and myBase:FindFirstChild("SpearGun")
+				local gunPivot = sg and sg:GetPivot()
+				local gunPos = gunPivot and gunPivot.Position or (hrp and hrp.Position)
+
+				-- 1) MEGALODON (Spear Gun Boss - Turret Mode + Math-calculated Trajectory)
 				if isMegActive and Cfg.AutoMeg ~= false then
-					pcall(function() MegEvent:FireServer("enter") end)
+					megWasActive = true
+					local inTurret = (LocalPlayer:GetAttribute("TurretMode") == true)
 
-					local megPos = nil
-					local megModel = workspace:FindFirstChild("Meg") or workspace:FindFirstChild("Megalodon")
-					if megModel then
-						megPos = megModel:GetPivot().Position
+					if not inTurret then
+						if hrp and not savedFishingCF then
+							savedFishingCF = hrp.CFrame
+						end
+
+						if isFishingActive() then
+							pcall(function() ReelIn:FireServer() end)
+						end
+
+						if sg and hrp and hum and hum.Health > 0 then
+							local p = sg:GetAttribute("GunPivot")
+							local gPos = typeof(p) == "CFrame" and p.Position or sg:GetPivot().Position
+							local fwdAttr = sg:GetAttribute("Fwd")
+							local fwd = typeof(fwdAttr) == "Vector3" and Vector3.new(fwdAttr.X, 0, fwdAttr.Z).Unit or sg:GetPivot().LookVector
+							local standPos = Vector3.new(gPos.X, hrp.Position.Y, gPos.Z) - fwd * 4.5
+							local standCF = CFrame.lookAt(standPos, standPos + fwd)
+
+							if (hrp.Position - standPos).Magnitude > 6 then
+								pcall(function()
+									hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+									hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+									hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+									hrp.AssemblyLinearVelocity = Vector3.zero
+									hrp.AssemblyAngularVelocity = Vector3.zero
+									hrp.CFrame = standCF
+								end)
+							end
+						end
+
+						local turretBtn = nil
+						local banner = PlayerGui:FindFirstChild("MegBannerUI")
+						if banner then
+							turretBtn = banner:FindFirstChild("TurretGo", true)
+						end
+						if not turretBtn then
+							turretBtn = PlayerGui:FindFirstChild("TurretGo", true)
+						end
+						if turretBtn and turretBtn.Visible then
+							clickGuiBtn(turretBtn)
+						end
+
+						if (os.clock() - lastTurretEnterAttempt) >= 0.6 then
+							lastTurretEnterAttempt = os.clock()
+							pcall(function() MegEvent:FireServer("enter") end)
+						end
+
+						if RtState.EventStatusBodyLbl then
+							RtState.EventStatusBodyLbl.Text = "Status: Entering Spear Gun Turret..."
+						end
 					else
-						megPos = Vector3.new(0, -10, 0)
-					end
+						local startT = workspace:GetAttribute("MegStart") or serverTime
+						local elapsed = math.max(0, serverTime - startT)
+						local megPos = nil
+						if FishingShared and FishingShared.MegPos then
+							pcall(function() megPos = FishingShared.MegPos(elapsed) end)
+						end
+						if not megPos then
+							local localMeg = workspace:FindFirstChild("MegalodonLocal")
+							local root = localMeg and localMeg:FindFirstChild("Root", true)
+							if root and root:IsA("BasePart") then
+								megPos = root.Position
+							end
+						end
 
-					if (os.clock() - lastSpearFire) >= 1.05 then
-						lastSpearFire = os.clock()
-						pcall(function() MegEvent:FireServer("fire", megPos) end)
+						if megPos and gunPos then
+							local dist = (megPos - gunPos).Magnitude
+							local maxRange = (FishingShared and FishingShared.Megalodon and FishingShared.Megalodon.Range) or 200
+							local cd = (FishingShared and FishingShared.Megalodon and FishingShared.Megalodon.Cooldown) or 2.0
+
+							if dist <= maxRange then
+								if (os.clock() - lastSpearFire) >= (cd + 0.05) then
+									lastSpearFire = os.clock()
+									pcall(function() MegEvent:FireServer("fire", megPos) end)
+									if RtState.EventStatusBodyLbl then
+										RtState.EventStatusBodyLbl.Text = string.format("Spear: FIRED Meg! (Dist: %.0f, CD: %.1f)", dist, cd)
+									end
+								else
+									if RtState.EventStatusBodyLbl then
+										local rem = math.max(0, (cd + 0.05) - (os.clock() - lastSpearFire))
+										RtState.EventStatusBodyLbl.Text = string.format("Spear: Reloading (%.1fs) | Dist: %.0f", rem, dist)
+									end
+								end
+							else
+								if RtState.EventStatusBodyLbl then
+									RtState.EventStatusBodyLbl.Text = string.format("Target: Out of Range (Dist: %.0f > %d)", dist, maxRange)
+								end
+							end
+						end
+					end
+				else
+					if megWasActive then
+						megWasActive = false
+						if LocalPlayer:GetAttribute("TurretMode") == true then
+							pcall(function() MegEvent:FireServer("leave") end)
+						end
+						if Cfg.AutoClaimEventLoot ~= false then
+							pcall(function() MegEvent:FireServer("closed") end)
+							local endUI = PlayerGui:FindFirstChild("MegEndUI")
+							if endUI then pcall(function() endUI:Destroy() end) end
+						end
+						if savedFishingCF and hrp and hum and hum.Health > 0 then
+							pcall(function()
+								hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+								hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+								hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+								hrp.AssemblyLinearVelocity = Vector3.zero
+								hrp.AssemblyAngularVelocity = Vector3.zero
+								hrp.CFrame = savedFishingCF
+							end)
+							savedFishingCF = nil
+						end
 					end
 				end
 
-				-- 2) THE BLOOP (Spear Gun Boss)
+				-- 2) THE BLOOP (Spear Gun Boss - Turret Mode + Math-calculated Trajectory)
 				if isBloopActive and Cfg.AutoBloop ~= false then
-					pcall(function() BloopEvent:FireServer("enter") end)
+					bloopWasActive = true
+					local inTurret = (LocalPlayer:GetAttribute("TurretMode") == true)
 
-					local bloopPos = nil
-					local bloopModel = workspace:FindFirstChild("Bloop")
-					if bloopModel then
-						bloopPos = bloopModel:GetPivot().Position
+					if not inTurret then
+						if hrp and not savedFishingCF then
+							savedFishingCF = hrp.CFrame
+						end
+
+						if isFishingActive() then
+							pcall(function() ReelIn:FireServer() end)
+						end
+
+						if sg and hrp and hum and hum.Health > 0 then
+							local p = sg:GetAttribute("GunPivot")
+							local gPos = typeof(p) == "CFrame" and p.Position or sg:GetPivot().Position
+							local fwdAttr = sg:GetAttribute("Fwd")
+							local fwd = typeof(fwdAttr) == "Vector3" and Vector3.new(fwdAttr.X, 0, fwdAttr.Z).Unit or sg:GetPivot().LookVector
+							local standPos = Vector3.new(gPos.X, hrp.Position.Y, gPos.Z) - fwd * 4.5
+							local standCF = CFrame.lookAt(standPos, standPos + fwd)
+
+							if (hrp.Position - standPos).Magnitude > 6 then
+								pcall(function()
+									hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+									hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+									hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+									hrp.AssemblyLinearVelocity = Vector3.zero
+									hrp.AssemblyAngularVelocity = Vector3.zero
+									hrp.CFrame = standCF
+								end)
+							end
+						end
+
+						local turretBtn = nil
+						local banner = PlayerGui:FindFirstChild("BloopBannerUI")
+						if banner then
+							turretBtn = banner:FindFirstChild("TurretGo", true)
+						end
+						if not turretBtn then
+							turretBtn = PlayerGui:FindFirstChild("TurretGo", true)
+						end
+						if turretBtn and turretBtn.Visible then
+							clickGuiBtn(turretBtn)
+						end
+
+						if (os.clock() - lastTurretEnterAttempt) >= 0.6 then
+							lastTurretEnterAttempt = os.clock()
+							pcall(function() BloopEvent:FireServer("enter") end)
+						end
+
+						if RtState.EventStatusBodyLbl then
+							RtState.EventStatusBodyLbl.Text = "Status: Entering Spear Gun Turret..."
+						end
 					else
-						bloopPos = Vector3.new(0, -15, 0)
-					end
+						local startT = workspace:GetAttribute("BloopStart") or serverTime
+						local elapsed = math.max(0, serverTime - startT)
+						local bloopPos = nil
+						if FishingShared and FishingShared.BloopPos then
+							pcall(function() bloopPos = FishingShared.BloopPos(elapsed) end)
+						end
+						if not bloopPos then
+							local localBloop = workspace:FindFirstChild("BloopLocal")
+							local root = localBloop and localBloop:FindFirstChild("Root", true)
+							if root and root:IsA("BasePart") then
+								bloopPos = root.Position
+							end
+						end
 
-					if (os.clock() - lastSpearFire) >= 1.05 then
-						lastSpearFire = os.clock()
-						pcall(function() BloopEvent:FireServer("fire", bloopPos) end)
+						if bloopPos and gunPos then
+							local dist = (bloopPos - gunPos).Magnitude
+							local maxRange = (FishingShared and FishingShared.Bloop and FishingShared.Bloop.Range) or 230
+							local cd = (FishingShared and FishingShared.Bloop and FishingShared.Bloop.Cooldown) or 2.0
+
+							if dist <= maxRange then
+								if (os.clock() - lastSpearFire) >= (cd + 0.05) then
+									lastSpearFire = os.clock()
+									pcall(function() BloopEvent:FireServer("fire", bloopPos) end)
+									if RtState.EventStatusBodyLbl then
+										RtState.EventStatusBodyLbl.Text = string.format("Spear: FIRED Bloop! (Dist: %.0f, CD: %.1f)", dist, cd)
+									end
+								else
+									if RtState.EventStatusBodyLbl then
+										local rem = math.max(0, (cd + 0.05) - (os.clock() - lastSpearFire))
+										RtState.EventStatusBodyLbl.Text = string.format("Spear: Reloading (%.1fs) | Dist: %.0f", rem, dist)
+									end
+								end
+							else
+								if RtState.EventStatusBodyLbl then
+									RtState.EventStatusBodyLbl.Text = string.format("Target: Out of Range (Dist: %.0f > %d)", dist, maxRange)
+								end
+							end
+						end
+					end
+				else
+					if bloopWasActive then
+						bloopWasActive = false
+						if LocalPlayer:GetAttribute("TurretMode") == true then
+							pcall(function() BloopEvent:FireServer("leave") end)
+						end
+						if Cfg.AutoClaimEventLoot ~= false then
+							pcall(function() BloopEvent:FireServer("closed") end)
+							local endUI = PlayerGui:FindFirstChild("BloopEndUI")
+							if endUI then pcall(function() endUI:Destroy() end) end
+						end
+						if savedFishingCF and hrp and hum and hum.Health > 0 then
+							pcall(function()
+								hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+								hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+								hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+								hrp.AssemblyLinearVelocity = Vector3.zero
+								hrp.AssemblyAngularVelocity = Vector3.zero
+								hrp.CFrame = savedFishingCF
+							end)
+							savedFishingCF = nil
+						end
 					end
 				end
 
-				-- 3) THE KRAKEN / HOLLOW KING (Dock Net Boss)
+				-- 3) THE KRAKEN / HOLLOW KING (Dock Net Boss - River Deployed Net Hits Kraken)
 				if isBossActive and Cfg.AutoKraken ~= false then
+					bossWasActive = true
 					if not isFishingActive() then
 						pcall(function() ThrowNet:FireServer() end)
 						task.wait(0.5)
@@ -5326,6 +5562,13 @@ do
 								task.wait(0.5)
 							end
 							pcall(function() ThrowNet:FireServer() end)
+						end
+					end
+				else
+					if bossWasActive then
+						bossWasActive = false
+						if Cfg.AutoClaimEventLoot ~= false then
+							pcall(function() BossEvent:FireServer("closed") end)
 						end
 					end
 				end
@@ -5349,16 +5592,12 @@ do
 					end
 				end
 
-				-- 5) AUTO CLAIM EVENT REWARDS
-				if Cfg.AutoClaimEventLoot ~= false then
-					pcall(function() BossEvent:FireServer("closed") end)
-					pcall(function() MegEvent:FireServer("closed") end)
-					pcall(function() BloopEvent:FireServer("closed") end)
-
+				-- 5) AUTO CLAIM EVENT REWARDS (Only when events are inactive)
+				if Cfg.AutoClaimEventLoot ~= false and not isBossActive and not isMegActive and not isBloopActive and not isPirateActive then
 					local pGui = PlayerGui
 					for _, g in ipairs(pGui:GetChildren()) do
-						if g:IsA("ScreenGui") and (g.Name == "PirateEndUI" or g.Name == "EventRecapUI" or string.find(g.Name, "EndUI")) then
-							local okBtn = g:FindFirstChild("PirateEndOK", true) or g:FindFirstChild("OK", true) or g:FindFirstChild("Collect", true)
+						if g:IsA("ScreenGui") and (g.Name == "PirateEndUI" or g.Name == "EventRecapUI" or string.find(g.Name, "EndUI") or g.Name == "CrateOpenUI") then
+							local okBtn = g:FindFirstChild("PirateEndOK", true) or g:FindFirstChild("OK", true) or g:FindFirstChild("Collect", true) or g:FindFirstChild("Claim", true)
 							if okBtn and okBtn:IsA("GuiButton") and okBtn.Visible then
 								clickGuiBtn(okBtn)
 							end
@@ -5366,7 +5605,7 @@ do
 					end
 				end
 			end
-			task.wait(0.3)
+			task.wait(0.25)
 		end
 	end)
 
@@ -5382,6 +5621,367 @@ do
 	end)
 end
 
+--====================================================================--
+-- [TAB 2: REWARD (DAILY LOGIN, PLAYTIME GIFTS, LUCKY SPIN, CONTRACTS & PASS)]
+--====================================================================--
+do
+	local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+	local RewardsRemote = Remotes:WaitForChild("Rewards")
+	local RetentionRemote = Remotes:WaitForChild("Retention")
+	local ContractsRemote = Remotes:WaitForChild("Contracts")
+	local ChallengeRemote = Remotes:WaitForChild("Challenge")
+	local SeasonPassRemote = Remotes:WaitForChild("SeasonPass")
+
+	-- Config Defaults for Reward Automation
+	Cfg.AutoClaimDailyMaster = (Cfg.AutoClaimDailyMaster ~= false)
+	Cfg.AutoClaimDailyLogin = (Cfg.AutoClaimDailyLogin ~= false)
+	Cfg.AutoClaimPlaytimeGifts = (Cfg.AutoClaimPlaytimeGifts ~= false)
+	Cfg.AutoLuckySpin = (Cfg.AutoLuckySpin ~= false)
+	Cfg.AutoClaimOffline = (Cfg.AutoClaimOffline ~= false)
+
+	Cfg.AutoClaimSeasonPass = (Cfg.AutoClaimSeasonPass ~= false)
+	Cfg.AutoPassAscension = (Cfg.AutoPassAscension == true)
+
+	Cfg.AutoContractsMaster = (Cfg.AutoContractsMaster ~= false)
+	Cfg.AutoClaimContracts = (Cfg.AutoClaimContracts ~= false)
+	Cfg.AutoClaimDailyChallenge = (Cfg.AutoClaimDailyChallenge ~= false)
+	Cfg.AutoRerollWait = (Cfg.AutoRerollWait == true)
+
+	-- ================================================================
+	-- LEFT COLUMN: Daily Rewards, Free Gifts, Lucky Wheel & Season Pass
+	-- ================================================================
+
+	-- Card 1: Daily & Playtime Rewards
+	local DailyCard = createSectionCard(RtState.TabReward.Left, "Daily & Playtime Rewards", "daily_star")
+	RtState.DailyStatusTitleLbl, RtState.DailyStatusBodyLbl = DailyCard:AddInfoParagraph(
+		"Daily: Loading...",
+		"Playtime: Checking gifts..."
+	)
+
+	DailyCard:AddToggle("AutoClaimDailyMaster", "Auto Claim All Daily & Gifts", Cfg.AutoClaimDailyMaster ~= false, function(val)
+		Cfg.AutoClaimDailyMaster = val
+		if not val then
+			if RtState.DailyStatusTitleLbl then RtState.DailyStatusTitleLbl.Text = "Daily: Idle (OFF)" end
+		end
+	end)
+
+	DailyCard:AddToggle("AutoClaimDailyLogin", "Auto Claim Daily Login (Streak)", Cfg.AutoClaimDailyLogin ~= false, function(val)
+		Cfg.AutoClaimDailyLogin = val
+	end)
+
+	DailyCard:AddToggle("AutoClaimPlaytimeGifts", "Auto Claim Playtime Gifts (1 to 7)", Cfg.AutoClaimPlaytimeGifts ~= false, function(val)
+		Cfg.AutoClaimPlaytimeGifts = val
+	end)
+
+	DailyCard:AddToggle("AutoLuckySpin", "Auto Spin Lucky Wheel (Every 30m)", Cfg.AutoLuckySpin ~= false, function(val)
+		Cfg.AutoLuckySpin = val
+	end)
+
+	DailyCard:AddToggle("AutoClaimOffline", "Auto Claim Offline Welcome Cash", Cfg.AutoClaimOffline ~= false, function(val)
+		Cfg.AutoClaimOffline = val
+	end)
+
+	local function claimAllDailyRoutine()
+		notify("Daily Rewards", "Claiming all available daily & gifts...", 2.5)
+		task.spawn(function()
+			pcall(function() RewardsRemote:InvokeServer("claimDaily") end)
+			pcall(function() RewardsRemote:InvokeServer("claimOffline") end)
+			pcall(function()
+				local st = RewardsRemote:InvokeServer("state")
+				if st and type(st.gifts) == "table" then
+					for idx, g in ipairs(st.gifts) do
+						if g.ready and not g.claimed then
+							RewardsRemote:InvokeServer("claimGift", idx)
+							task.wait(0.2)
+						end
+					end
+				end
+			end)
+			pcall(function()
+				local st = RetentionRemote:InvokeServer("state")
+				if st and st.spin and (st.spin.spins or 0) > 0 then
+					RetentionRemote:InvokeServer("spin")
+				end
+			end)
+			notify("Daily Rewards", "Daily claim sweep complete!", 2.5)
+		end)
+	end
+
+	DailyCard:AddButton("Claim All Daily & Gifts Now", function()
+		claimAllDailyRoutine()
+	end)
+
+	-- Card 2: Season Pass Automation
+	local PassCard = createSectionCard(RtState.TabReward.Left, "Season Pass (Harvest Tide)", "ocean_chest")
+	RtState.PassStatusTitleLbl, RtState.PassStatusBodyLbl = PassCard:AddInfoParagraph(
+		"Season Pass: Loading...",
+		"Tiers: Checking..."
+	)
+
+	PassCard:AddToggle("AutoClaimSeasonPass", "Auto Claim Pass Tiers", Cfg.AutoClaimSeasonPass ~= false, function(val)
+		Cfg.AutoClaimSeasonPass = val
+		if not val then
+			if RtState.PassStatusTitleLbl then RtState.PassStatusTitleLbl.Text = "Season Pass: Idle (OFF)" end
+		end
+	end)
+
+	PassCard:AddToggle("AutoPassAscension", "Auto Ascend Pass on Max Tier", Cfg.AutoPassAscension == true, function(val)
+		Cfg.AutoPassAscension = val
+	end)
+
+	local function claimPassRoutine()
+		notify("Season Pass", "Claiming unlocked pass tiers...", 2.5)
+		task.spawn(function()
+			local ok, res = pcall(function() return SeasonPassRemote:InvokeServer("claimAll") end)
+			if ok and res and res.state then
+				if Cfg.AutoPassAscension and res.state.canAsc then
+					pcall(function() SeasonPassRemote:InvokeServer("ascend") end)
+					notify("Season Pass", "Season Pass Ascended!", 3.0)
+				else
+					notify("Season Pass", "Claimed all unlocked tiers!", 2.5)
+				end
+			end
+		end)
+	end
+
+	PassCard:AddButton("Claim All Pass Tiers Now", function()
+		claimPassRoutine()
+	end)
+
+	-- ================================================================
+	-- RIGHT COLUMN: Quests, Contracts, Challenges & Promo Codes
+	-- ================================================================
+
+	-- Card 3: Quests & Contracts Automation
+	local QuestCard = createSectionCard(RtState.TabReward.Right, "Quests & Contracts", "quests")
+	RtState.QuestStatusTitleLbl, RtState.QuestStatusBodyLbl = QuestCard:AddInfoParagraph(
+		"Contracts: Loading...",
+		"Challenges: Checking..."
+	)
+
+	QuestCard:AddToggle("AutoContractsMaster", "Auto Claim Contracts & Challenges", Cfg.AutoContractsMaster ~= false, function(val)
+		Cfg.AutoContractsMaster = val
+		if not val then
+			if RtState.QuestStatusTitleLbl then RtState.QuestStatusTitleLbl.Text = "Contracts: Idle (OFF)" end
+		end
+	end)
+
+	QuestCard:AddToggle("AutoClaimContracts", "Auto Claim Completed Contracts", Cfg.AutoClaimContracts ~= false, function(val)
+		Cfg.AutoClaimContracts = val
+	end)
+
+	QuestCard:AddToggle("AutoClaimDailyChallenge", "Auto Claim Daily Challenge", Cfg.AutoClaimDailyChallenge ~= false, function(val)
+		Cfg.AutoClaimDailyChallenge = val
+	end)
+
+	QuestCard:AddToggle("AutoRerollWait", "Auto Reroll Cooldown Contracts", Cfg.AutoRerollWait == true, function(val)
+		Cfg.AutoRerollWait = val
+	end)
+
+	local function claimContractsRoutine()
+		notify("Contracts", "Claiming completed contracts...", 2.5)
+		task.spawn(function()
+			pcall(function()
+				local st = ContractsRemote:InvokeServer("state")
+				if st and type(st.list) == "table" then
+					for idx, c in ipairs(st.list) do
+						if c.done then
+							ContractsRemote:InvokeServer("claim", idx)
+							task.wait(0.2)
+						elseif Cfg.AutoRerollWait and c.k == "wait" and (c.rerollIn or 0) <= 0 then
+							ContractsRemote:InvokeServer("reroll", idx)
+							task.wait(0.2)
+						end
+					end
+				end
+			end)
+			pcall(function()
+				local st = ChallengeRemote:InvokeServer("state")
+				if st and type(st.tiers) == "table" then
+					for idx, t in ipairs(st.tiers) do
+						if t.done and not t.claimed then
+							ChallengeRemote:InvokeServer("claim", idx)
+							task.wait(0.2)
+						end
+					end
+				end
+			end)
+			notify("Contracts", "Contracts & Challenges sweep complete!", 2.5)
+		end)
+	end
+
+	QuestCard:AddButton("Claim Completed Contracts Now", function()
+		claimContractsRoutine()
+	end)
+
+	-- Card 4: Promo Codes (Redeem)
+	local CodeCard = createSectionCard(RtState.TabReward.Right, "Redeem Promo Codes", "keybind")
+	RtState.PromoCodeBoxAPI = CodeCard:AddTextBox("Promo Code", "Enter promo code here...", "")
+	RtState.CodeStatusTitleLbl, RtState.CodeStatusBodyLbl = CodeCard:AddInfoParagraph(
+		"Code Status: Ready",
+		"Type code and click Redeem Code below."
+	)
+
+	CodeCard:AddButton("Redeem Code", function()
+		local code = RtState.PromoCodeBoxAPI:GetText()
+		if not code or #code == 0 then
+			notify("Promo Code", "Please enter a code first.", 2.5)
+			return
+		end
+		pcall(function()
+			local ok, res = pcall(function() return RewardsRemote:InvokeServer("redeem", code) end)
+			if ok and type(res) == "table" then
+				local msg = res.msg or (res.ok and "Code redeemed successfully!" or "Code is invalid or expired.")
+				if RtState.CodeStatusTitleLbl then
+					RtState.CodeStatusTitleLbl.Text = res.ok and "Code: Success! 🎉" or "Code: Failed"
+				end
+				if RtState.CodeStatusBodyLbl then
+					RtState.CodeStatusBodyLbl.Text = msg
+				end
+				notify("Promo Code", msg, 3.5)
+				if res.ok then RtState.PromoCodeBoxAPI:SetText("") end
+			else
+				notify("Promo Code", "Server error while redeeming.", 3.0)
+			end
+		end)
+	end)
+
+	-- ================================================================
+	-- BACKGROUND REWARD & QUEST AUTOMATION LOOP
+	-- ================================================================
+	task.spawn(function()
+		while ScriptAlive do
+			task.wait(6.0)
+
+			-- 1. Daily & Playtime Rewards
+			if Cfg.AutoClaimDailyMaster ~= false then
+				pcall(function()
+					local st = RewardsRemote:InvokeServer("state")
+					if st then
+						if Cfg.AutoClaimDailyLogin ~= false and st.daily and st.daily.claimable then
+							RewardsRemote:InvokeServer("claimDaily")
+						end
+
+						local claimedCount = 0
+						local readyCount = 0
+						if type(st.gifts) == "table" then
+							for idx, g in ipairs(st.gifts) do
+								if g.claimed then claimedCount = claimedCount + 1 end
+								if g.ready and not g.claimed then
+									readyCount = readyCount + 1
+									if Cfg.AutoClaimPlaytimeGifts ~= false then
+										RewardsRemote:InvokeServer("claimGift", idx)
+										task.wait(0.2)
+									end
+								end
+							end
+						end
+
+						if Cfg.AutoClaimOffline ~= false then
+							pcall(function() RewardsRemote:InvokeServer("claimOffline") end)
+						end
+
+						local spinReady = 0
+						local retSt = RetentionRemote:InvokeServer("state")
+						if retSt and retSt.spin then
+							spinReady = retSt.spin.spins or 0
+							if Cfg.AutoLuckySpin ~= false and spinReady > 0 then
+								RetentionRemote:InvokeServer("spin")
+								spinReady = 0
+							end
+						end
+
+						if RtState.DailyStatusTitleLbl then
+							local dayNum = st.daily and (st.daily.day or 1) or 1
+							local streak = st.daily and (st.daily.streak or 1) or 1
+							local status = (st.daily and st.daily.claimable) and "Ready to Claim!" or "Claimed"
+							RtState.DailyStatusTitleLbl.Text = string.format("Daily: Day %d (Streak: %d) • %s", dayNum, streak, status)
+						end
+						if RtState.DailyStatusBodyLbl then
+							RtState.DailyStatusBodyLbl.Text = string.format("Gifts: %d/7 Claimed | Spin Wheel: %d Ready", claimedCount, spinReady)
+						end
+					end
+				end)
+			end
+
+			-- 2. Season Pass
+			if Cfg.AutoClaimSeasonPass ~= false then
+				pcall(function()
+					local st = SeasonPassRemote:InvokeServer("state")
+					if st then
+						local curTier = st.tier or 0
+						local curXp = st.xp or 0
+						local canAsc = st.canAsc == true
+
+						SeasonPassRemote:InvokeServer("claimAll")
+
+						if Cfg.AutoPassAscension and canAsc then
+							SeasonPassRemote:InvokeServer("ascend")
+						end
+
+						if RtState.PassStatusTitleLbl then
+							RtState.PassStatusTitleLbl.Text = string.format("Pass: Tier %d / 50 • %s", curTier, st.name or "Harvest Tide")
+						end
+						if RtState.PassStatusBodyLbl then
+							RtState.PassStatusBodyLbl.Text = string.format("XP: %s | Ascend: %s", tostring(curXp), canAsc and "READY!" or "Max Needed")
+						end
+					end
+				end)
+			end
+
+			-- 3. Contracts & Challenges
+			if Cfg.AutoContractsMaster ~= false then
+				pcall(function()
+					local cSt = ContractsRemote:InvokeServer("state")
+					local readyContracts = 0
+					local doneTotal = cSt and (cSt.done or 0) or 0
+					local activeDesc = "None"
+
+					if cSt and type(cSt.list) == "table" then
+						for idx, c in ipairs(cSt.list) do
+							if c.done then
+								readyContracts = readyContracts + 1
+								if Cfg.AutoClaimContracts ~= false then
+									ContractsRemote:InvokeServer("claim", idx)
+									task.wait(0.2)
+								end
+							else
+								if c.text and #c.text > 0 and c.k ~= "wait" then
+									activeDesc = c.text
+								end
+							end
+							if Cfg.AutoRerollWait and c.k == "wait" and (c.rerollIn or 0) <= 0 then
+								ContractsRemote:InvokeServer("reroll", idx)
+								task.wait(0.2)
+							end
+						end
+					end
+
+					local chSt = ChallengeRemote:InvokeServer("state")
+					local chTiersDone = 0
+					if chSt and type(chSt.tiers) == "table" then
+						for idx, t in ipairs(chSt.tiers) do
+							if t.done then
+								chTiersDone = chTiersDone + 1
+								if not t.claimed and Cfg.AutoClaimDailyChallenge ~= false then
+									ChallengeRemote:InvokeServer("claim", idx)
+									task.wait(0.2)
+								end
+							end
+						end
+					end
+
+					if RtState.QuestStatusTitleLbl then
+						RtState.QuestStatusTitleLbl.Text = string.format("Contracts: %d Claimed (Done: %d)", readyContracts, doneTotal)
+					end
+					if RtState.QuestStatusBodyLbl then
+						RtState.QuestStatusBodyLbl.Text = string.format("Challenge: %d/3 Tiers | %s", chTiersDone, activeDesc)
+					end
+				end)
+			end
+		end
+	end)
+end
 -- [TAB 8: SETTINGS — CONFIG MANAGER, AUTO LOAD, AUTO EXECUTE & KEYBIND]
 --====================================================================--
 RtState.ConfigRootFolder = "SerennityHub"
@@ -5968,15 +6568,73 @@ task.defer(function()
 end)
 
 --====================================================================--
--- ANTI-AFK & AUTO-RECONNECT SYSTEM (Multi-layered: getconnections + Reactive Idled + Periodic Heartbeat + Prompt Handler)
+-- ANTI-AFK & AUTO-RECONNECT SYSTEM (Multi-layered: getconnections + Reactive Idled + Game Input/Move Pulse + Map AFK Dismiss + Periodic Heartbeat)
 --====================================================================--
+local vim = game:GetService("VirtualInputManager")
+
+local function dismissMapAFK()
+	local afkScreen = PlayerGui:FindFirstChild("AFKModeScreen")
+	if (afkScreen and afkScreen.Enabled == true) or LocalPlayer:GetAttribute("AFKScreen") == true then
+		pcall(function()
+			RunService:Set3dRenderingEnabled(true)
+		end)
+		pcall(function()
+			LocalPlayer:SetAttribute("AFKScreen", nil)
+		end)
+		pcall(function()
+			local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
+			local AFKState = Remotes and Remotes:FindFirstChild("AFKState")
+			if AFKState then
+				AFKState:FireServer(false)
+			end
+		end)
+		if afkScreen then
+			afkScreen.Enabled = false
+			local backBtn = afkScreen:FindFirstChild("AFKBack", true) or afkScreen:FindFirstChild("BACK TO GAME", true)
+			if backBtn and backBtn:IsA("GuiButton") then
+				pcall(function()
+					for _, c in ipairs(getconnections(backBtn.MouseButton1Click)) do c:Fire() end
+					for _, c in ipairs(getconnections(backBtn.Activated)) do c:Fire() end
+				end)
+			end
+		end
+		pcall(function()
+			vim:SendKeyEvent(true, Enum.KeyCode.F15, false, game)
+			task.wait(0.02)
+			vim:SendKeyEvent(false, Enum.KeyCode.F15, false, game)
+		end)
+	end
+end
+
 local function sendAntiAFKPulse()
+	-- 1. Roblox Engine Idled bypass
 	pcall(function()
 		VirtualUser:CaptureController()
 		VirtualUser:Button2Down(Vector2.zero)
-		task.wait(0.1)
+		task.wait(0.05)
 		VirtualUser:Button2Up(Vector2.zero)
 	end)
+
+	-- 2. Game-level UserInputService InputBegan pulse (resets map's 5-minute AFK timer)
+	pcall(function()
+		vim:SendKeyEvent(true, Enum.KeyCode.F15, false, game)
+		task.wait(0.02)
+		vim:SendKeyEvent(false, Enum.KeyCode.F15, false, game)
+	end)
+
+	-- 3. Game-level Humanoid micro-move pulse (resets MoveDirection check in AFKModeClient)
+	pcall(function()
+		local char = LocalPlayer.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum and hum.Health > 0 then
+			hum:Move(Vector3.new(0.001, 0, 0), false)
+			task.wait(0.02)
+			hum:Move(Vector3.zero, false)
+		end
+	end)
+
+	-- 4. Active dismissal check in case AFK screen ever opened
+	dismissMapAFK()
 end
 
 -- Layer 1: Bypass Roblox engine's default Idled connections if exploit supports it
@@ -5992,6 +6650,16 @@ pcall(function()
 	end
 end)
 
+-- Neutralize game's built-in 16-minute auto-reconnect (which forces a server reload and unloads injected scripts)
+pcall(function()
+	LocalPlayer:SetAttribute("Set_StayAFK", false)
+	local pScripts = LocalPlayer:FindFirstChild("PlayerScripts")
+	local keepScript = pScripts and pScripts:FindFirstChild("AFKKeepClient")
+	if keepScript then
+		keepScript.Disabled = true
+	end
+end)
+
 -- Layer 2: Reactive handler if Idled signal fires
 table.insert(Connections, LocalPlayer.Idled:Connect(function()
 	if Cfg.AntiAFK ~= false or Cfg.Rejoin == true or (RtState.SystemSettings and RtState.SystemSettings.Rejoin == true) then
@@ -5999,13 +6667,31 @@ table.insert(Connections, LocalPlayer.Idled:Connect(function()
 	end
 end))
 
--- Layer 3: Active Periodic Heartbeat Loop (every 60s) so client never even reaches idle threshold
+-- Layer 2.1: Reactive dismissal if map sets AFKScreen attribute or enables AFKModeScreen
+table.insert(Connections, LocalPlayer:GetAttributeChangedSignal("AFKScreen"):Connect(function()
+	if Cfg.AntiAFK ~= false and LocalPlayer:GetAttribute("AFKScreen") == true then
+		dismissMapAFK()
+	end
+end))
+
+pcall(function()
+	local afkScreen = PlayerGui:FindFirstChild("AFKModeScreen")
+	if afkScreen then
+		table.insert(Connections, afkScreen:GetPropertyChangedSignal("Enabled"):Connect(function()
+			if Cfg.AntiAFK ~= false and afkScreen.Enabled == true then
+				dismissMapAFK()
+			end
+		end))
+	end
+end)
+
+-- Layer 3: Active Periodic Heartbeat Loop (every 30s) keeping both Roblox and Map timers at 0
 task.spawn(function()
 	while ScriptAlive do
 		if Cfg.AntiAFK ~= false then
 			sendAntiAFKPulse()
 		end
-		task.wait(60)
+		task.wait(30)
 	end
 end)
 
