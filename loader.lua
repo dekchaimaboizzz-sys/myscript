@@ -4466,6 +4466,7 @@ end)
 --====================================================================--
 RtState.TabMain = createTab("Main", "main")
 RtState.TabReward = createTab("Reward", "daily_star")
+RtState.TabUpgrade = createTab("Upgrade", "reroll_bolt")
 RtState.TabSettings = createTab("Settings", "settings")
 
 
@@ -5619,6 +5620,110 @@ do
 			end
 		end
 	end)
+
+	-- 5. Auto-Dismiss Popups, Crate Reveals & Dialogs Engine (Instant Reactive & Polling)
+	local function checkAndDismissPopups()
+		pcall(function()
+			local pGui = PlayerGui
+
+			-- A. CrateOpenUI ("YOU GOT PET / FISH!", "AWESOME!" Button)
+			local crateUI = pGui:FindFirstChild("CrateOpenUI")
+			if crateUI and crateUI.Enabled then
+				for _, b in ipairs(crateUI:GetDescendants()) do
+					if b:IsA("GuiButton") then
+						clickGuiBtn(b)
+					end
+				end
+				crateUI.Enabled = false
+			end
+
+			-- B. RebirthUnlocksUI ("REBIRTH X", "AWESOME!" Button)
+			local rebirthUnl = pGui:FindFirstChild("RebirthUnlocksUI")
+			if rebirthUnl then
+				for _, b in ipairs(rebirthUnl:GetDescendants()) do
+					if b:IsA("GuiButton") or b.Name == "UnlocksOk" then
+						clickGuiBtn(b)
+					end
+				end
+				rebirthUnl.Enabled = false
+				pcall(function() rebirthUnl:Destroy() end)
+			end
+
+			-- B. Generic Reward / Reveal / End Dialogs
+			for _, g in ipairs(pGui:GetChildren()) do
+				if g:IsA("ScreenGui") and g ~= ScreenGui and g.Enabled then
+					local gName = g.Name
+					if gName == "CrateOpenUI" or gName == "EventRecapUI" or gName == "PirateEndUI" 
+						or gName == "MegEndUI" or gName == "BloopEndUI" or gName == "AFKSummaryUI" 
+						or gName == "OfflinePromoUI" or gName == "AutoThrowPromo" or gName == "PassOffer" 
+						or gName == "RebirthOfferUI" or string.find(gName, "EndUI") or string.find(gName, "Promo") then
+						
+						for _, desc in ipairs(g:GetDescendants()) do
+							if desc:IsA("GuiButton") and desc.Visible then
+								local txt = ""
+								if desc:IsA("TextButton") then
+									txt = desc.Text
+								else
+									local lbl = desc:FindFirstChildWhichIsA("TextLabel", true)
+									if lbl then txt = lbl.Text end
+								end
+
+								local u = string.upper(txt)
+								if u:find("AWESOME") or u == "OK" or u:find("CLAIM") or u:find("COLLECT") or u == "CLOSE" or u == "DISMISS" or u == "X" or u:find("NO THANKS") or u:find("LATER") or desc.Name == "Button" or desc.Name == "PirateEndOK" then
+									clickGuiBtn(desc)
+								end
+							end
+						end
+					else
+						-- Check any stray buttons that say "AWESOME!"
+						for _, desc in ipairs(g:GetDescendants()) do
+							if desc:IsA("GuiButton") and desc.Visible then
+								local txt = ""
+								if desc:IsA("TextButton") then
+									txt = desc.Text
+								else
+									local lbl = desc:FindFirstChildWhichIsA("TextLabel", true)
+									if lbl then txt = lbl.Text end
+								end
+								if string.upper(txt):find("AWESOME") then
+									clickGuiBtn(desc)
+								end
+							end
+						end
+					end
+				end
+			end
+		end)
+	end
+
+	-- Reactive hook for CrateOpenUI
+	pcall(function()
+		local crateUI = PlayerGui:WaitForChild("CrateOpenUI", 10)
+		if crateUI then
+			table.insert(Connections, crateUI:GetPropertyChangedSignal("Enabled"):Connect(function()
+				if crateUI.Enabled then
+					task.wait(0.08)
+					checkAndDismissPopups()
+				end
+			end))
+		end
+	end)
+
+	-- Reactive hook for new ScreenGuis added
+	table.insert(Connections, PlayerGui.ChildAdded:Connect(function(child)
+		if child:IsA("ScreenGui") and child ~= ScreenGui then
+			task.wait(0.08)
+			checkAndDismissPopups()
+		end
+	end))
+
+	-- Fast polling heartbeat loop
+	task.spawn(function()
+		while ScriptAlive do
+			checkAndDismissPopups()
+			task.wait(0.3)
+		end
+	end)
 end
 
 --====================================================================--
@@ -5978,6 +6083,461 @@ do
 						RtState.QuestStatusBodyLbl.Text = string.format("Challenge: %d/3 Tiers | %s", chTiersDone, activeDesc)
 					end
 				end)
+			end
+		end
+	end)
+end
+--====================================================================--
+-- [TAB 3: UPGRADE (AUTO REBIRTH, AUTO BUY NET & POTION AUTOMATION)]
+--====================================================================--
+do
+	local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+	local FishingShared = require(ReplicatedStorage:WaitForChild("FishingShared"))
+	local RebirthRequest = Remotes:WaitForChild("RebirthRequest")
+	local BuyItem = Remotes:WaitForChild("BuyItem")
+	local PotionsRemote = Remotes:WaitForChild("Potions")
+	local GetData = Remotes:WaitForChild("GetData")
+
+	-- Config Defaults for Upgrade Automation
+	Cfg.AutoRebirth = (Cfg.AutoRebirth ~= false)
+	if not Cfg.TargetRebirth or Cfg.TargetRebirth == 19 then
+		Cfg.TargetRebirth = 60
+	else
+		Cfg.TargetRebirth = tonumber(Cfg.TargetRebirth) or 60
+	end
+	Cfg.AutoEquipBest = (Cfg.AutoEquipBest ~= false)
+	Cfg.AutoBuyNet = (Cfg.AutoBuyNet ~= false)
+	Cfg.AutoUseAllPotions = (Cfg.AutoUseAllPotions ~= false)
+	Cfg.AutoBuyPotions = (Cfg.AutoBuyPotions ~= false)
+	Cfg.ServerAutoPotion = (Cfg.ServerAutoPotion ~= false)
+	Cfg.AutoBuyPerks = (Cfg.AutoBuyPerks == true)
+
+	-- Format helper for compact cash display
+	local function formatCash(val: number): string
+		if not val or val == 0 then return "$0" end
+		local sfx = {"", "k", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"}
+		local idx = 1
+		local n = val
+		while n >= 1000 and idx < #sfx do
+			n = n / 1000
+			idx = idx + 1
+		end
+		if idx == 1 then
+			return string.format("$%d", n)
+		else
+			return string.format("$%.2f%s", n, sfx[idx])
+		end
+	end
+
+	local function formatTime(sec: number): string
+		if not sec or sec <= 0 then return "0m" end
+		local h = math.floor(sec / 3600)
+		local m = math.floor((sec % 3600) / 60)
+		if h > 0 then
+			return string.format("%dh %02dm", h, m)
+		else
+			return string.format("%dm", m)
+		end
+	end
+
+	-- ================================================================
+	-- LEFT COLUMN: Rebirth Automation & Net Progression
+	-- ================================================================
+
+	-- Card 1: Rebirth Automation
+	local RebirthCard = createSectionCard(RtState.TabUpgrade.Left, "Rebirth Automation", "reroll_bolt")
+	RtState.RebirthStatusTitleLbl, RtState.RebirthStatusBodyLbl = RebirthCard:AddInfoParagraph(
+		"Rebirth: Checking status...",
+		"Requirements: Inspecting..."
+	)
+
+	RebirthCard:AddToggle("AutoRebirth", "Auto Rebirth When Ready", Cfg.AutoRebirth ~= false, function(val)
+		Cfg.AutoRebirth = val
+		if not val and RtState.RebirthStatusTitleLbl then
+			RtState.RebirthStatusTitleLbl.Text = "Rebirth: Idle (OFF)"
+		end
+	end)
+
+	RebirthCard:AddSlider("TargetRebirth", "Target Rebirth Limit", 1, 60, Cfg.TargetRebirth or 60, 1, "", function(val)
+		Cfg.TargetRebirth = val
+	end)
+
+	RebirthCard:AddToggle("AutoEquipBest", "Auto Equip Best Showcase Fish", Cfg.AutoEquipBest ~= false, function(val)
+		Cfg.AutoEquipBest = val
+		if val then
+			pcall(function() Remotes.BestSetup:FireServer() end)
+		end
+	end)
+
+	RebirthCard:AddButton("Equip Best Showcase Now", function()
+		pcall(function()
+			Remotes.BestSetup:FireServer()
+			notify("Showcase", "Equipped highest income fish!", 2.5)
+		end)
+	end)
+
+	RebirthCard:AddButton("Rebirth Now (Manual Trigger)", function()
+		task.spawn(function()
+			local data = GetData:InvokeServer()
+			local canRb, nextReq = FishingShared.CanRebirth(data)
+			if canRb then
+				notify("Rebirth", "Initiating Rebirth...", 3)
+				RebirthRequest:FireServer()
+				-- Immediately dismiss popup and equip best
+				task.spawn(function()
+					for _ = 1, 20 do
+						task.wait(0.15)
+						local pGui = LocalPlayer:WaitForChild("PlayerGui", 5)
+						local unl = pGui and pGui:FindFirstChild("RebirthUnlocksUI")
+						if unl then
+							for _, b in ipairs(unl:GetDescendants()) do
+								if b:IsA("GuiButton") or b.Name == "UnlocksOk" then
+									pcall(function()
+										for _, conn in ipairs(getconnections and getconnections(b.MouseButton1Click) or {}) do conn:Fire() end
+										for _, conn in ipairs(getconnections and getconnections(b.Activated) or {}) do conn:Fire() end
+									end)
+								end
+							end
+							unl.Enabled = false
+							pcall(function() unl:Destroy() end)
+							break
+						end
+					end
+					if Cfg.AutoEquipBest ~= false then
+						pcall(function() Remotes.BestSetup:FireServer() end)
+					end
+				end)
+			else
+				local reqCash = nextReq and nextReq.Cash and formatCash(nextReq.Cash) or "?"
+				notify("Rebirth", "Requirements not met! Needs " .. reqCash, 3.5)
+			end
+		end)
+	end)
+
+	-- Card 2: Net Upgrades
+	local NetCard = createSectionCard(RtState.TabUpgrade.Left, "Net Progression", "fish")
+	RtState.NetStatusTitleLbl, RtState.NetStatusBodyLbl = NetCard:AddInfoParagraph(
+		"Net: Checking current tier...",
+		"Next Tier: Inspecting shop..."
+	)
+
+	NetCard:AddToggle("AutoBuyNet", "Auto Buy Next Net Tier", Cfg.AutoBuyNet ~= false, function(val)
+		Cfg.AutoBuyNet = val
+		if not val and RtState.NetStatusTitleLbl then
+			RtState.NetStatusTitleLbl.Text = "Net: Idle (OFF)"
+		end
+	end)
+
+	NetCard:AddButton("Buy Next Net Now", function()
+		task.spawn(function()
+			local data = GetData:InvokeServer()
+			local curTier = data.NetTier or 1
+			local nextTier = curTier + 1
+			if nextTier > #FishingShared.Nets then
+				notify("Net Upgrade", "Max Net Tier already reached!", 3)
+				return
+			end
+			local nextNet = FishingShared.Nets[nextTier]
+			local ok, msg = FishingShared.NetRebirthOk(data, nextTier)
+			if not ok then
+				notify("Net Locked", "Rebirth requirement: " .. tostring(msg), 3.5)
+				return
+			end
+			if (data.Cash or 0) < (nextNet.Cost or 0) then
+				notify("Net Locked", "Need " .. formatCash(nextNet.Cost), 3.5)
+				return
+			end
+			BuyItem:FireServer("Net", nextTier)
+			notify("Net Upgrade", "Purchased " .. tostring(nextNet.Name) .. "!", 3)
+		end)
+	end)
+
+	-- ================================================================
+	-- RIGHT COLUMN: Potion Automation & Perks
+	-- ================================================================
+
+	-- Card 3: Potion Automation
+	local PotionCard = createSectionCard(RtState.TabUpgrade.Right, "Potion Automation", "aura_sparkle")
+	RtState.PotionStatusTitleLbl, RtState.PotionStatusBodyLbl = PotionCard:AddInfoParagraph(
+		"Potions: Scanning active buffs...",
+		"Stock: Checking refresh..."
+	)
+
+	PotionCard:AddToggle("AutoUseAllPotions", "Auto Use All Potions", Cfg.AutoUseAllPotions ~= false, function(val)
+		Cfg.AutoUseAllPotions = val
+		if val then
+			task.spawn(function()
+				local res = PotionsRemote:InvokeServer("useAll")
+				local count = (res and res.drank) or 0
+				notify("Potions", string.format("Auto Use All: drank %d potion(s)!", count), 2.5)
+			end)
+		end
+	end)
+
+	PotionCard:AddToggle("AutoBuyPotions", "Auto Buy Stock Potions (Shop)", Cfg.AutoBuyPotions ~= false, function(val)
+		Cfg.AutoBuyPotions = val
+	end)
+
+	PotionCard:AddToggle("ServerAutoPotion", "Keep Server Auto-Potion Active", Cfg.ServerAutoPotion ~= false, function(val)
+		Cfg.ServerAutoPotion = val
+		if val then
+			pcall(function() PotionsRemote:InvokeServer("auto", true) end)
+		end
+	end)
+
+	PotionCard:AddButton("Use All Potions Now (Drink All)", function()
+		task.spawn(function()
+			local res = PotionsRemote:InvokeServer("useAll")
+			local count = (res and res.drank) or 0
+			notify("Potions", string.format("Drank %d potion(s) from cooler!", count), 3)
+		end)
+	end)
+
+	PotionCard:AddButton("Buy All Stock Potions Now", function()
+		task.spawn(function()
+			local potState = PotionsRemote:InvokeServer("state")
+			local data = GetData:InvokeServer()
+			local boughtCount = 0
+			if potState and potState.stock then
+				for slotIdx, s in ipairs(potState.stock) do
+					if not s.bought and (data.Cash or 0) >= (s.price or 0) then
+						local ok = pcall(function() PotionsRemote:InvokeServer("buy", slotIdx) end)
+						if ok then boughtCount = boughtCount + 1 end
+						task.wait(0.2)
+					end
+				end
+			end
+			if Cfg.AutoUseAllPotions ~= false then
+				pcall(function() PotionsRemote:InvokeServer("useAll") end)
+			end
+			notify("Potion Shop", string.format("Bought %d stock potion(s)!", boughtCount), 3)
+		end)
+	end)
+
+	-- Card 4: Skill Perks
+	local PerkCard = createSectionCard(RtState.TabUpgrade.Right, "Perk Upgrades (Skills)", "rod_skills")
+	RtState.PerkStatusTitleLbl, RtState.PerkStatusBodyLbl = PerkCard:AddInfoParagraph(
+		"Perks: Ready",
+		"Upgrades: Fishing, Market, Showcase"
+	)
+
+	PerkCard:AddToggle("AutoBuyPerks", "Auto Buy Affordable Perks", Cfg.AutoBuyPerks == true, function(val)
+		Cfg.AutoBuyPerks = val
+	end)
+
+	PerkCard:AddButton("Upgrade All Affordable Perks Now", function()
+		task.spawn(function()
+			local data = GetData:InvokeServer()
+			local upgraded = 0
+			if FishingShared.Upgrades then
+				for _, u in ipairs(FishingShared.Upgrades) do
+					local curLvl = data.Upgrades and data.Upgrades[u.Id] or 0
+					if not u.MaxLevel or curLvl < u.MaxLevel then
+						local ok = FishingShared.UpgradeLevelOk(data, u, curLvl + 1)
+						local cost = FishingShared.UpgradeCost and FishingShared.UpgradeCost(u.Id, curLvl)
+						if ok and cost and (data.Cash or 0) >= cost then
+							BuyItem:FireServer("Upgrade", u.Id)
+							upgraded = upgraded + 1
+							task.wait(0.1)
+						end
+					end
+				end
+			end
+			notify("Perks", string.format("Upgraded %d perk(s)!", upgraded), 3)
+		end)
+	end)
+
+	-- ================================================================
+	-- BACKGROUND WORKER: Upgrade, Net & Potion Loop (Every 3.5s)
+	-- ================================================================
+	task.spawn(function()
+		task.wait(3.5)
+		local lastPotionCheck = 0
+		local lastPerkCheck = 0
+		local lastBestSetup = 0
+
+		while true do
+			task.wait(3.5)
+
+			local success, err = pcall(function()
+				local data = GetData:InvokeServer()
+				if not data then return end
+
+				local curRb = data.Rebirths or 0
+				local targetRb = tonumber(Cfg.TargetRebirth) or 60
+				local curCash = data.Cash or 0
+
+				-- 1. REBIRTH CHECK & STATUS
+				local canRb, nextReq = FishingShared.CanRebirth(data)
+				local rankName = FishingShared.Ranks and FishingShared.Ranks[curRb] and FishingShared.Ranks[curRb].Name or "Unknown"
+				local nextRankName = nextReq and nextReq.Name or "Max"
+
+				if RtState.RebirthStatusTitleLbl then
+					RtState.RebirthStatusTitleLbl.Text = string.format("Rebirth: %d / %d • Rank: %s", curRb, targetRb, rankName)
+				end
+
+				if RtState.RebirthStatusBodyLbl then
+					if curRb >= FishingShared.MaxRebirth then
+						RtState.RebirthStatusBodyLbl.Text = "MAX REBIRTH REACHED (Rank: " .. rankName .. ")"
+					elseif canRb then
+						RtState.RebirthStatusBodyLbl.Text = string.format("Next: %s • STATUS: READY TO REBIRTH!", nextRankName)
+					else
+						local reqCash = nextReq and nextReq.Cash or 0
+						local pct = reqCash > 0 and math.clamp((curCash / reqCash) * 100, 0, 100) or 100
+						RtState.RebirthStatusBodyLbl.Text = string.format("Next: %s • Cash: %s / %s (%.1f%%)", nextRankName, formatCash(curCash), formatCash(reqCash), pct)
+					end
+				end
+
+				if Cfg.AutoRebirth ~= false and curRb < targetRb and canRb then
+					RebirthRequest:FireServer()
+					notify("Auto Rebirth", string.format("Rebirthed to %d! Multipliers boosted.", curRb + 1), 3.5)
+
+					-- Instantly dismiss the RebirthUnlocksUI popup and equip best showcase
+					task.spawn(function()
+						for _ = 1, 20 do
+							task.wait(0.15)
+							local pGui = LocalPlayer:WaitForChild("PlayerGui", 5)
+							local unl = pGui and pGui:FindFirstChild("RebirthUnlocksUI")
+							if unl then
+								for _, b in ipairs(unl:GetDescendants()) do
+									if b:IsA("GuiButton") or b.Name == "UnlocksOk" then
+										pcall(function()
+											for _, conn in ipairs(getconnections and getconnections(b.MouseButton1Click) or {}) do conn:Fire() end
+											for _, conn in ipairs(getconnections and getconnections(b.Activated) or {}) do conn:Fire() end
+										end)
+									end
+								end
+								unl.Enabled = false
+								pcall(function() unl:Destroy() end)
+								break
+							end
+						end
+						-- Auto Equip Best Showcase Fish after Rebirth
+						if Cfg.AutoEquipBest ~= false then
+							pcall(function() Remotes.BestSetup:FireServer() end)
+						end
+					end)
+
+					task.wait(1.5)
+					return
+				end
+
+				-- 2. NET CHECK & STATUS
+				local curNetTier = data.NetTier or 1
+				local nextNetTier = curNetTier + 1
+				local curNet = FishingShared.Nets and FishingShared.Nets[curNetTier]
+				local nextNet = FishingShared.Nets and FishingShared.Nets[nextNetTier]
+
+				if RtState.NetStatusTitleLbl then
+					RtState.NetStatusTitleLbl.Text = string.format("Current Net: #%d %s", curNetTier, curNet and curNet.Name or "Default")
+				end
+
+				if RtState.NetStatusBodyLbl then
+					if not nextNet then
+						RtState.NetStatusBodyLbl.Text = "MAX NET TIER REACHED • Top Net Equipped"
+					else
+						local ok, rbReq = FishingShared.NetRebirthOk(data, nextNetTier)
+						if not ok then
+							RtState.NetStatusBodyLbl.Text = string.format("Next: #%d %s (%s) • LOCKED (Req Rebirth %s)", nextNetTier, nextNet.Name, formatCash(nextNet.Cost), tostring(rbReq))
+						elseif curCash < (nextNet.Cost or 0) then
+							local pct = nextNet.Cost > 0 and math.clamp((curCash / nextNet.Cost) * 100, 0, 100) or 0
+							RtState.NetStatusBodyLbl.Text = string.format("Next: #%d %s (%s) • Cash: %.1f%%", nextNetTier, nextNet.Name, formatCash(nextNet.Cost), pct)
+						else
+							RtState.NetStatusBodyLbl.Text = string.format("Next: #%d %s (%s) • READY TO BUY!", nextNetTier, nextNet.Name, formatCash(nextNet.Cost))
+						end
+					end
+				end
+
+				if Cfg.AutoBuyNet ~= false and nextNet then
+					local ok = FishingShared.NetRebirthOk(data, nextNetTier)
+					if ok and curCash >= (nextNet.Cost or 0) then
+						BuyItem:FireServer("Net", nextNetTier)
+						notify("Auto Buy Net", string.format("Upgraded to Net #%d %s!", nextNetTier, nextNet.Name), 3)
+						task.wait(0.5)
+					end
+				end
+
+				-- 3. POTION AUTOMATION CHECK (Every ~5s)
+				if os.clock() - lastPotionCheck >= 5 then
+					lastPotionCheck = os.clock()
+
+					if Cfg.ServerAutoPotion ~= false then
+						pcall(function() PotionsRemote:InvokeServer("auto", true) end)
+					end
+
+					local potState = PotionsRemote:InvokeServer("state")
+					if potState then
+						-- Auto Buy Shop Potions
+						if Cfg.AutoBuyPotions ~= false and potState.stock then
+							for slotIdx, s in ipairs(potState.stock) do
+								if not s.bought and curCash >= (s.price or 0) then
+									pcall(function() PotionsRemote:InvokeServer("buy", slotIdx) end)
+									task.wait(0.2)
+								end
+							end
+						end
+
+						-- Auto Use All Potions (Cooler & Inventory)
+						if Cfg.AutoUseAllPotions ~= false then
+							pcall(function()
+								PotionsRemote:InvokeServer("useAll")
+							end)
+						end
+
+						-- Update Labels
+						local activeList = {}
+						local now = os.time()
+						if potState.active then
+							for kind, act in pairs(potState.active) do
+								local exp = type(act) == "table" and (act.e or act.left or act.expires) or (type(act) == "number" and act or 0)
+								local leftSec = (exp > now) and (exp - now) or (type(act) == "table" and act.left or 0)
+								if leftSec > 0 then
+									table.insert(activeList, string.format("%s: %s", tostring(kind), formatTime(leftSec)))
+								end
+							end
+						end
+
+						if RtState.PotionStatusTitleLbl then
+							local autoStr = potState.auto and "ON" or "OFF"
+							RtState.PotionStatusTitleLbl.Text = string.format("Active Potions: %d Active • Server Auto: %s", #activeList, autoStr)
+						end
+
+						if RtState.PotionStatusBodyLbl then
+							if #activeList > 0 then
+								RtState.PotionStatusBodyLbl.Text = table.concat(activeList, " | ")
+							else
+								local refIn = potState.refreshIn and formatTime(potState.refreshIn) or "..."
+								RtState.PotionStatusBodyLbl.Text = string.format("No active buffs • Next stock refresh in: %s", refIn)
+							end
+						end
+					end
+				end
+
+				-- 4. PERK UPGRADES CHECK (Every ~10s if enabled)
+				if Cfg.AutoBuyPerks == true and FishingShared.Upgrades and (os.clock() - lastPerkCheck >= 10) then
+					lastPerkCheck = os.clock()
+					for _, u in ipairs(FishingShared.Upgrades) do
+						local curLvl = data.Upgrades and data.Upgrades[u.Id] or 0
+						if not u.MaxLevel or curLvl < u.MaxLevel then
+							local ok = FishingShared.UpgradeLevelOk(data, u, curLvl + 1)
+							local cost = FishingShared.UpgradeCost and FishingShared.UpgradeCost(u.Id, curLvl)
+							if ok and cost and curCash >= cost then
+								BuyItem:FireServer("Upgrade", u.Id)
+								task.wait(0.1)
+							end
+						end
+					end
+				end
+
+				-- 5. AUTO EQUIP BEST SHOWCASE FISH (Every ~10s if enabled)
+				if Cfg.AutoEquipBest ~= false and (os.clock() - lastBestSetup >= 10) then
+					lastBestSetup = os.clock()
+					pcall(function() Remotes.BestSetup:FireServer() end)
+				end
+			end)
+
+			if not success and err then
+				-- Silently caught to maintain 100% stability
 			end
 		end
 	end)
